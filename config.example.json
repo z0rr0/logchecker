@@ -1,0 +1,34 @@
+{
+  "sender": {
+    "user": "user@host.com",
+    "password": "password",
+    "host": "smtp.host.com",
+    "addr": "smtp.host.com:25"
+  },
+  "interval": 60,
+  "observed": [
+    {
+      "name": "service name1",
+      "files": [
+        // check "filename1" every 120 seconds and send a notification
+        // if "pattern1" was found in new lines.
+        {"file": "filename1", "delay": 120, "pattern1"},
+        {"file": "filename2", "delay": 30, ""}
+      ],
+      "boundary": 1,
+      "increasing": true,
+      "emails": ["email1", "email2"],
+      "limits": [1, 24, 168] // per hour, day, week
+    },
+    {
+      "name": "service name1",
+      "files": [
+        {"file": "filename1", "delay": 120, "pattern"}
+      ],
+      "boundary": 6,
+      "increasing": false,
+      "emails": ["email1"],
+      "limits": [1, 2, 10] // per hour, day, week
+    }
+  ]
+}
