@@ -5,30 +5,43 @@
     "host": "smtp.host.com",
     "addr": "smtp.host.com:25"
   },
-  "interval": 60,
   "observed": [
     {
-      "name": "service name1",
+      "name": "Nginx",
       "files": [
-        // check "filename1" every 120 seconds and send a notification
-        // if "pattern1" was found in new lines.
-        {"file": "filename1", "delay": 120, "pattern1"},
-        {"file": "filename2", "delay": 30, ""}
-      ],
-      "boundary": 1,
-      "increasing": true,
-      "emails": ["email1", "email2"],
-      "limits": [1, 24, 168] // per hour, day, week
+        {
+          "file": "/var/log/nginx/error.log",
+          "delay": 180,
+          "pattern": "",
+          "boundary": 1,
+          "increase": true,
+          "emails": ["user_1@host.com", "user_2@host.com"],
+          "limits": [10, 20, 100]
+        },
+        {
+          "file": "/var/log/nginx/access.log",
+          "delay": 600,
+          "pattern": "HTTP/1.1\" 500",
+          "boundary": 2,
+          "increase": true,
+          "emails": ["user_1@host.com"],
+          "limits": [2, 24, 168]
+        }
+      ]
     },
     {
-      "name": "service name1",
+      "name": "My service",
       "files": [
-        {"file": "filename1", "delay": 120, "pattern"}
-      ],
-      "boundary": 6,
-      "increasing": false,
-      "emails": ["email1"],
-      "limits": [1, 2, 10] // per hour, day, week
+        {
+          "file": "/var/log/syslog",
+          "delay": 300,
+          "pattern": "My service error",
+          "boundary": 1,
+          "increase": false,
+          "emails": ["user_1@host.com", "user_2@host.com"],
+          "limits": [6, 120, 300]
+        }
+      ]
     }
   ]
 }
