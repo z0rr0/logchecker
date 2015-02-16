@@ -25,6 +25,7 @@ Files for observation can be added using a configuration file, see examples in [
 
 ```javascript
 {
+  "storage": "memory",                          // now only "memory" backend is supported
   "sender": {                                   // send email through this smtp server
     "user": "user@host.com",                    // username
     "password": "password",                     // user password
@@ -54,7 +55,7 @@ Files for observation can be added using a configuration file, see examples in [
 
 Use standard Go testing mechanism:
 
-```bash
+```shell
 cd $GOPATH/src/github.com/z0rr0/logchecker
 go test
 ```
@@ -70,7 +71,9 @@ Standard [Go library](http://golang.org/pkg/).
 There are recommended style guides:
 
 * [The Go Programming Language Specification](https://golang.org/ref/spec)
-* [Go Code Review Comments](https://github.com/golang/go/wiki/CodeReviewComments)
+* [Go Code Review Comments](https://github.com/golang/go/wiki/CodeReviewComments).
+
+A compliance with the second style guide can be checked using [go-lint](http://go-lint.appspot.com/github.com/z0rr0/logchecker) tool.
 
 ### License
 

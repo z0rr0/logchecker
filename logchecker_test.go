@@ -53,22 +53,38 @@ func TestNew(t *testing.T) {
         t.Errorf("incorrect response: %v\n", err)
     }
     logger.Cfg.Sender = map[string]string{
-     "user": "user@host.com",
-     "password": "password",
-     "host": "smtp.host.com",
-     // "addr": "smtp.host.com:25",
+        "user": "user@host.com",
+        "password": "password",
+        "host": "smtp.host.com",
+        // "addr": "smtp.host.com:25",
     }
     if err := logger.Validate(); err == nil {
         t.Errorf("incorrect response: %v\n", err)
     }
     logger.Cfg.Sender = map[string]string{
-     "user": "user@host.com",
-     "password": "password",
-     "host": "smtp.host.com",
-     "addr": "",
+        "user": "user@host.com",
+        "password": "password",
+        "host": "smtp.host.com",
+        "addr": "",
     }
     if err := logger.Validate(); err == nil {
         t.Errorf("incorrect response: %v\n", err)
+    }
+    logger.Cfg.Sender = map[string]string{
+        "user": "user@host.com",
+        "password": "password",
+        "host": "smtp.host.com",
+        "addr": "smtp.host.com:25",
+    }
+    if err := logger.Validate(); err == nil {
+        t.Errorf("incorrect response: %v\n", err)
+    }
+    logger.Cfg.Storage = "memory"
+    if err := logger.Validate(); err != nil {
+        t.Errorf("incorrect response: %v\n", err)
+    }
+    if logger.Backend.GetName() != "Memory" {
+        t.Errorf("incorrect backend name: %v\n", logger.Backend.GetName())
     }
 }
 

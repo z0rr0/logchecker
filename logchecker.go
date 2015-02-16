@@ -47,13 +47,18 @@ var (
     LoggerDebug = log.New(ioutil.Discard, "LogChecker DEBUG: ", log.Ldate|log.Lmicroseconds|log.Lshortfile)
 )
 
+// Backender is an interface to handle data storage operations.
+type Backender interface {
+    GetName() string
+}
+
 // File is a type of settings for a watched file.
 type File struct {
     Log string      `json:"file"`
     Delay uint      `json:"delay"`
     Pattern string  `json:"pattern"`
     Boundary uint   `json:"boundary"`
-    Increase bool `json:"increase"`
+    Increase bool   `json:"increase"`
     Emails []string `json:"emails"`
     Limits []uint   `json:"limits"`
 }
@@ -69,6 +74,23 @@ type Config struct {
     Path string
     Sender map[string]string  `json:"sender"`
     Observed []Service        `json:"observed"`
+    Storage string            `json:"storage"`
+}
+
+// LogChecker is a main object for logging.
+type LogChecker struct {
+    Name string
+    Cfg Config
+    Backend Backender
+    mutex sync.RWMutex
+}
+
+type MemoryBackend struct {
+    Name string
+}
+
+func (bk *MemoryBackend) GetName() string {
+    return bk.Name
 }
 
 func (cfg Config) String() string {
@@ -81,14 +103,7 @@ func (cfg Config) String() string {
         }
         services[i] = fmt.Sprintf("%v\n\t%v", service.Name, strings.Join(files, "\n\t"))
     }
-    return fmt.Sprintf("Config: %v\n sender: %v\n---\n%v", cfg.Path, cfg.Sender, strings.Join(services, "\n---\n"))
-}
-
-// LogChecker is a main object for logging.
-type LogChecker struct {
-    Name string
-    Cfg Config
-    mutex sync.RWMutex
+    return fmt.Sprintf("Config: %v\n sender: %v backend: %v\n---\n%v", cfg.Path, cfg.Sender, cfg.Storage, strings.Join(services, "\n---\n"))
 }
 
 // HasService checks that the Service is included to the LogChecker.
@@ -142,7 +157,7 @@ func (logger *LogChecker) Validate() error {
         services[serv.Name] = true
     }
     // check sender fields
-    mandatory := []string{"user", "password", "host", "addr"}
+    mandatory := [4]string{"user", "password", "host", "addr"}
     for _, field := range mandatory {
         v, ok := logger.Cfg.Sender[field]
         if !ok {
@@ -152,6 +167,16 @@ func (logger *LogChecker) Validate() error {
             return fmt.Errorf("sender field can't be empty [%v]", field)
         }
     }
+    // check backend
+    var backend Backender
+    switch logger.Cfg.Storage {
+        case "memory":
+            backend = &MemoryBackend{"Memory"}
+    }
+    if backend == nil {
+        return fmt.Errorf("unknown backend")
+    }
+    logger.Backend = backend
     return nil
 }
 
@@ -202,7 +227,6 @@ func InitConfig(logger *LogChecker, name string) error {
         LoggerError.Println("Can't read config file")
         return err
     }
-    // logptr := &logger
     err = json.Unmarshal(jsondata, &logger.Cfg)
     if err != nil {
         LoggerError.Println("Can't parse config file")
