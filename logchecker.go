@@ -20,7 +20,7 @@
 // Manually initialization of setting to send emails:
 //
 //     logger := logchecker.New()
-//     logger.Cfg.Sender := map[string]string{
+//     logger.Cfg.Sender = map[string]string{
 //      "user": "user@host.com",
 //      "password": "password",
 //      "host": "smtp.host.com",

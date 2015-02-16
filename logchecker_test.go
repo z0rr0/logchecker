@@ -15,58 +15,82 @@ import (
 
 func TestDebugMode(t *testing.T) {
     if (LoggerError == nil) || (LoggerDebug == nil) {
-        t.Errorf("Incorrect references")
+        t.Errorf("incorrect references")
     }
     DebugMode(false)
     if (LoggerError.Prefix() != "LogChecker ERROR: ") || (LoggerDebug.Prefix() != "LogChecker DEBUG: ") {
-        t.Errorf("Incorrect loggers settings")
+        t.Errorf("incorrect loggers settings")
     }
     DebugMode(true)
     if (LoggerError.Flags() != 19) || (LoggerDebug.Flags() != 21) {
-        t.Errorf("Incorrect loggers settings")
+        t.Errorf("incorrect loggers settings")
     }
 }
 
 func TestNew(t *testing.T) {
     logger := New()
     if logger == nil {
-        t.Errorf("Incorrect reference")
+        t.Errorf("incorrect reference")
     }
     serv := Service{}
     if err := logger.AddService(&serv); err == nil {
-        t.Errorf("Incorrect response for empty Service: %v\n", err)
+        t.Errorf("incorrect response for empty Service: %v\n", err)
     }
     serv.Name = "TestSrv"
     if logger.HasService(&serv, true) {
-        t.Errorf("Incorrect response")
+        t.Errorf("incorrect response")
     }
     if err := logger.AddService(&serv); err != nil {
-        t.Errorf("Incorrect response: %v\n", err)
+        t.Errorf("incorrect response: %v\n", err)
     }
     if !logger.HasService(&serv, true) {
-        t.Errorf("Incorrect response")
+        t.Errorf("incorrect response")
+    }
+    if err := logger.AddService(&serv); err == nil {
+        t.Errorf("incorrect response: %v\n", err)
+    }
+    if err := logger.Validate(); err == nil {
+        t.Errorf("incorrect response: %v\n", err)
+    }
+    logger.Cfg.Sender = map[string]string{
+     "user": "user@host.com",
+     "password": "password",
+     "host": "smtp.host.com",
+     // "addr": "smtp.host.com:25",
+    }
+    if err := logger.Validate(); err == nil {
+        t.Errorf("incorrect response: %v\n", err)
+    }
+    logger.Cfg.Sender = map[string]string{
+     "user": "user@host.com",
+     "password": "password",
+     "host": "smtp.host.com",
+     "addr": "",
+    }
+    if err := logger.Validate(); err == nil {
+        t.Errorf("incorrect response: %v\n", err)
     }
 }
 
 func TestFilePath(t *testing.T) {
     if _, err := FilePath("invalid_name"); err == nil {
-        t.Errorf("Incorrect response")
+        t.Errorf("incorrect response")
     }
     if _, err := FilePath(""); err == nil {
-        t.Errorf("Incorrect response")
+        t.Errorf("incorrect response")
     }
     pwd := os.Getenv("PWD")
     os.Setenv("PWD", "")
     if _, err := FilePath("unknown"); err == nil {
-        t.Errorf("Incorrect response")
+        t.Errorf("incorrect response")
     }
     os.Setenv("PWD", pwd)
     realfile := filepath.Join(os.Getenv("GOPATH"), "src/github.com/z0rr0/logchecker/config.example.json")
     if path, err := FilePath(realfile); err != nil {
-        t.Errorf("Incorrect response, the file should exist")
+        t.Errorf("incorrect response, the file should exist")
     } else {
         if path != realfile {
-            t.Errorf("Ivalid paths")
+            t.Errorf("ivalid paths")
         }
     }
 }
@@ -75,18 +99,25 @@ func TestInitConfig(t *testing.T) {
     logger := New()
     example := filepath.Join(os.Getenv("GOPATH"), "src/github.com/z0rr0/logchecker/config.example.json")
     if err := InitConfig(logger, example); err != nil {
-        t.Errorf("Error during InitConfig")
+        t.Errorf("error during InitConfig")
+    }
+
+    if len(logger.Cfg.Observed) > 1 {
+        logger.Cfg.Observed[1].Name = "Nginx"
+        if err := logger.Validate(); err == nil {
+            t.Errorf("wrong validation [%v]", err)
+        }
     }
     if l := len(logger.Cfg.String()); l <= 0 {
-        t.Errorf("Error, config should be initiated")
+        t.Errorf("config should be initiated")
     }
     if err := InitConfig(logger, "invalid_name"); err == nil {
-        t.Errorf("Need error during InitConfig")
+        t.Errorf("need error during InitConfig")
     }
     if err := InitConfig(logger, "/etc/shadow"); err == nil {
-        t.Errorf("Need permissions error during InitConfig")
+        t.Errorf("need permissions error during InitConfig")
     }
     if err := InitConfig(logger, "/etc/passwd"); err == nil {
-        t.Errorf("Need json error during InitConfig")
+        t.Errorf("need json error during InitConfig")
     }
 }
