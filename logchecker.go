@@ -41,13 +41,13 @@ import (
 )
 
 var (
-    // Error logger
+    // LoggerError implements error logger.
     LoggerError = log.New(os.Stderr, "LogChecker ERROR: ", log.Ldate|log.Ltime|log.Lshortfile)
-    // Debug logger, it's disabled by default
+    // LoggerDebug implements debug logger, it's disabled by default.
     LoggerDebug = log.New(ioutil.Discard, "LogChecker DEBUG: ", log.Ldate|log.Lmicroseconds|log.Lshortfile)
 )
 
-// Type of settings for a watched file.
+// File is a type of settings for a watched file.
 type File struct {
     Log string      `json:"file"`
     Delay uint      `json:"delay"`
@@ -58,13 +58,13 @@ type File struct {
     Limits []uint   `json:"limits"`
 }
 
-// Type of settings for a watched service.
+// Service is a type of settings for a watched service.
 type Service struct {
     Name string   `json:"name"`
     Files []File  `json:"files"`
 }
 
-// Main configuration settings.
+// Config is main configuration settings.
 type Config struct {
     Path string
     Sender map[string]string  `json:"sender"`
@@ -84,7 +84,7 @@ func (cfg Config) String() string {
     return fmt.Sprintf("Config: %v\n sender: %v\n---\n%v", cfg.Path, cfg.Sender, strings.Join(services, "\n---\n"))
 }
 
-// Main object for logging.
+// LogChecker is a main object for logging.
 type LogChecker struct {
     Name string
     Cfg Config
@@ -116,10 +116,10 @@ func (logger *LogChecker) AddService(serv *Service) error {
         logger.mutex.Unlock()
     }()
     if len(serv.Name) == 0 {
-        return fmt.Errorf("service name should not be empty.")
+        return fmt.Errorf("service name should not be empty")
     }
     if logger.HasService(serv, false) {
-        return fmt.Errorf("service [%v] is already used.", serv.Name)
+        return fmt.Errorf("service [%v] is already used", serv.Name)
     }
     logger.Cfg.Observed = append(logger.Cfg.Observed, *serv)
     LoggerDebug.Printf("new service is added: %v\n", serv.Name)
@@ -137,7 +137,7 @@ func (logger *LogChecker) Validate() error {
     for _, serv := range logger.Cfg.Observed {
         _, ok := services[serv.Name]
         if ok {
-            return fmt.Errorf("configuration error, service names should be unique: %v", serv.Name)
+            return fmt.Errorf("service names should be unique [%v]", serv.Name)
         }
         services[serv.Name] = true
     }
@@ -146,10 +146,10 @@ func (logger *LogChecker) Validate() error {
     for _, field := range mandatory {
         v, ok := logger.Cfg.Sender[field]
         if !ok {
-            return fmt.Errorf("configuration error, missing sender field: %v", field)
+            return fmt.Errorf("missing sender field [%v]", field)
         }
         if len(v) == 0 {
-            return fmt.Errorf("configuration error, sender field can't be empty: %v", field)
+            return fmt.Errorf("sender field can't be empty [%v]", field)
         }
     }
     return nil
