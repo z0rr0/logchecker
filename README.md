@@ -4,7 +4,7 @@ It is a simple library to check a list of logs files and send notification about
 
 ### Usage
 
-API descriptions can be found on [godoc](http://godoc.org/github.com/z0rr0/logchecker).
+API descriptions can be found on [godoc.org](http://godoc.org/github.com/z0rr0/logchecker).
 
 ```go
 import "logchecker"
@@ -16,6 +16,8 @@ if err := logchecker.InitConfig(logger, "config.json"); err != nil {
     log.Panicf("logchecker error: %v\n", err)
 }
 ```
+
+[![GoDoc](https://godoc.org/github.com/z0rr0/logchecker?status.svg)](https://godoc.org/github.com/z0rr0/logchecker)
 
 ### Configuration
 
@@ -58,6 +60,17 @@ go test
 ```
 
 There is a [nice article](http://blog.golang.org/cover) about tests covering.
+
+### Dependencies
+
+Standard [Go library](http://golang.org/pkg/).
+
+### Design guidelines
+
+There are recommended style guides:
+
+* [The Go Programming Language Specification](https://golang.org/ref/spec)
+* [Go Code Review Comments](https://github.com/golang/go/wiki/CodeReviewComments)
 
 ### License
 

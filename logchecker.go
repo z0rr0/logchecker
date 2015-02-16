@@ -2,7 +2,7 @@
 // Use of this source code is governed by a LGPL-style
 // license that can be found in the LICENSE file.
 
-// LogChecker package is a simple library to check a list of logs files
+// Package logchecker is a simple library to check a list of logs files
 // and send notification about their abnormal activities.
 //
 // Error logger is activated by default,
@@ -41,10 +41,13 @@ import (
 )
 
 var (
-    LoggerError *log.Logger = log.New(os.Stderr, "LogChecker ERROR: ", log.Ldate|log.Ltime|log.Lshortfile)
-    LoggerDebug *log.Logger = log.New(ioutil.Discard, "LogChecker DEBUG: ", log.Ldate|log.Lmicroseconds|log.Lshortfile)
+    // Error logger
+    LoggerError = log.New(os.Stderr, "LogChecker ERROR: ", log.Ldate|log.Ltime|log.Lshortfile)
+    // Debug logger, it's disabled by default
+    LoggerDebug = log.New(ioutil.Discard, "LogChecker DEBUG: ", log.Ldate|log.Lmicroseconds|log.Lshortfile)
 )
 
+// Type of settings for a watched file.
 type File struct {
     Log string      `json:"file"`
     Delay uint      `json:"delay"`
@@ -55,11 +58,13 @@ type File struct {
     Limits []uint   `json:"limits"`
 }
 
+// Type of settings for a watched service.
 type Service struct {
     Name string   `json:"name"`
     Files []File  `json:"files"`
 }
 
+// Main configuration settings.
 type Config struct {
     Path string
     Sender map[string]string  `json:"sender"`
@@ -79,13 +84,14 @@ func (cfg Config) String() string {
     return fmt.Sprintf("Config: %v\n sender: %v\n---\n%v", cfg.Path, cfg.Sender, strings.Join(services, "\n---\n"))
 }
 
+// Main object for logging.
 type LogChecker struct {
     Name string
     Cfg Config
     mutex sync.RWMutex
 }
 
-// Check that the Service is included to the LogChecker.
+// HasService checks that the Service is included to the LogChecker.
 // It can use locked mode to guarantee that service array will be
 // immutable during reading.
 func (logger *LogChecker) HasService(serv *Service, lock bool) bool {
@@ -103,24 +109,24 @@ func (logger *LogChecker) HasService(serv *Service, lock bool) bool {
     return false
 }
 
-// Include new Service to the LogChecker.
+// AddService includes a new Service to the LogChecker.
 func (logger *LogChecker) AddService(serv *Service) error {
     logger.mutex.Lock()
     defer func() {
         logger.mutex.Unlock()
     }()
     if len(serv.Name) == 0 {
-        return fmt.Errorf("Service name should not be empty.")
+        return fmt.Errorf("service name should not be empty.")
     }
     if logger.HasService(serv, false) {
-        return fmt.Errorf("Service [%v] is already used.", serv.Name)
+        return fmt.Errorf("service [%v] is already used.", serv.Name)
     }
     logger.Cfg.Observed = append(logger.Cfg.Observed, *serv)
-    LoggerDebug.Printf("New service is added: %v\n", serv.Name)
+    LoggerDebug.Printf("new service is added: %v\n", serv.Name)
     return nil
 }
 
-// Validate the configuraion.
+// Validate checks the configuraion.
 func (logger *LogChecker) Validate() error {
     logger.mutex.RLock()
     defer func() {
@@ -131,7 +137,7 @@ func (logger *LogChecker) Validate() error {
     for _, serv := range logger.Cfg.Observed {
         _, ok := services[serv.Name]
         if ok {
-            return fmt.Errorf("Configuration error, service names should be unique: %v", serv.Name)
+            return fmt.Errorf("configuration error, service names should be unique: %v", serv.Name)
         }
         services[serv.Name] = true
     }
@@ -140,16 +146,16 @@ func (logger *LogChecker) Validate() error {
     for _, field := range mandatory {
         v, ok := logger.Cfg.Sender[field]
         if !ok {
-            return fmt.Errorf("Configuration error, missing sender field: %v", field)
+            return fmt.Errorf("configuration error, missing sender field: %v", field)
         }
         if len(v) == 0 {
-            return fmt.Errorf("Configuration error, Sender field can't be empty: %v", field)
+            return fmt.Errorf("configuration error, sender field can't be empty: %v", field)
         }
     }
     return nil
 }
 
-// Initialization of Logger handlers
+// DebugMode is a initialization of Logger handlers.
 func DebugMode(debugmode bool) {
     debugHandle := ioutil.Discard
     if debugmode {
@@ -159,12 +165,12 @@ func DebugMode(debugmode bool) {
         log.Ldate|log.Lmicroseconds|log.Lshortfile)
 }
 
-// New LogChecker object
+// New created new LogChecker object and returns its reference.
 func New() *LogChecker {
     return &LogChecker{}
 }
 
-// It validates file name, converts its path from relative to absolute
+// FilePath validates file name, converts its path from relative to absolute
 // using current directory address.
 func FilePath(name string) (string, error) {
     var (
@@ -173,7 +179,7 @@ func FilePath(name string) (string, error) {
     )
     fullpath = strings.Trim(name, " ")
     if len(fullpath) < 1 {
-        return fullpath, fmt.Errorf("Empty file name")
+        return fullpath, fmt.Errorf("empty file name")
     }
     fullpath, err = filepath.Abs(fullpath)
     if err != nil {
@@ -183,7 +189,7 @@ func FilePath(name string) (string, error) {
     return fullpath, err
 }
 
-// Initializes configuration from a file.
+// InitConfig initializes configuration from a file.
 func InitConfig(logger *LogChecker, name string) error {
     path, err := FilePath(name)
     if err != nil {
