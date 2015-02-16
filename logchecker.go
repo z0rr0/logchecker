@@ -40,6 +40,10 @@ import (
     "path/filepath"
 )
 
+// const (
+
+// )
+
 var (
     // LoggerError implements error logger.
     LoggerError = log.New(os.Stderr, "LogChecker ERROR: ", log.Ldate|log.Ltime|log.Lshortfile)
@@ -61,6 +65,7 @@ type File struct {
     Increase bool   `json:"increase"`
     Emails []string `json:"emails"`
     Limits []uint   `json:"limits"`
+    Counter [3]uint
 }
 
 // Service is a type of settings for a watched service.
@@ -85,10 +90,12 @@ type LogChecker struct {
     mutex sync.RWMutex
 }
 
+// MemoryBackend is a type for the implementation of memory storage methods.
 type MemoryBackend struct {
     Name string
 }
 
+// GetName of MemoryBackend returns a name of the logger back-end.
 func (bk *MemoryBackend) GetName() string {
     return bk.Name
 }
@@ -141,7 +148,13 @@ func (logger *LogChecker) AddService(serv *Service) error {
     return nil
 }
 
-// Validate checks the configuraion.
+// Watch starts a logger observation.
+func (logger *LogChecker) Watch() {
+    pending, complete := make(chan *File), make(chan *File)
+
+}
+
+// Validate checks the configuration.
 func (logger *LogChecker) Validate() error {
     logger.mutex.RLock()
     defer func() {
