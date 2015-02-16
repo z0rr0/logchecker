@@ -28,9 +28,23 @@ func TestDebugMode(t *testing.T) {
 }
 
 func TestNew(t *testing.T) {
-    obj := New()
-    if obj == nil {
+    logger := New()
+    if logger == nil {
         t.Errorf("Incorrect reference")
+    }
+    serv := Service{}
+    if err := logger.AddService(&serv); err == nil {
+        t.Errorf("Incorrect response for empty Service: %v\n", err)
+    }
+    serv.Name = "TestSrv"
+    if logger.HasService(&serv, true) {
+        t.Errorf("Incorrect response")
+    }
+    if err := logger.AddService(&serv); err != nil {
+        t.Errorf("Incorrect response: %v\n", err)
+    }
+    if !logger.HasService(&serv, true) {
+        t.Errorf("Incorrect response")
     }
 }
 

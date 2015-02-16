@@ -29,7 +29,7 @@ Files for observation can be added using a configuration file, see examples in [
   },
   "observed": [                                 // array of observed services
     {
-      "name": "Nginx",                          // service name
+      "name": "Nginx",                          // unique service name
       "files": [                                // array of files for observation
         {
           "file": "/var/log/nginx/error.log",   // file for observation

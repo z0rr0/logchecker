@@ -33,6 +33,7 @@ import (
     "os"
     "log"
     "fmt"
+    "sync"
     "strings"
     "io/ioutil"
     "encoding/json"
@@ -81,6 +82,66 @@ func (cfg Config) String() string {
 type LogChecker struct {
     Name string
     Cfg Config
+    mutex sync.RWMutex
+}
+
+// Check that the Service is included to the LogChecker.
+// It can use locked mode to guarantee that service array will be
+// immutable during reading.
+func (logger *LogChecker) HasService(serv *Service, lock bool) bool {
+    if lock {
+        logger.mutex.RLock()
+        defer func() {
+            logger.mutex.RUnlock()
+        }()
+    }
+    for _, s := range logger.Cfg.Observed {
+        if s.Name == serv.Name {
+            return true
+        }
+    }
+    return false
+}
+
+// Include new Service to the LogChecker.
+func (logger *LogChecker) AddService(serv *Service) error {
+    logger.mutex.Lock()
+    defer func() {
+        logger.mutex.Unlock()
+    }()
+    if len(serv.Name) == 0 {
+        return fmt.Errorf("Service name should not be empty.")
+    }
+    if logger.HasService(serv, false) {
+        return fmt.Errorf("Service [%v] is already used.", serv.Name)
+    }
+    logger.Cfg.Observed = append(logger.Cfg.Observed, *serv)
+    LoggerDebug.Printf("New service is added: %v\n", serv.Name)
+    return nil
+}
+
+// Validate the configuraion.
+func (logger *LogChecker) Validate() error {
+    logger.mutex.RLock()
+    defer func() {
+        logger.mutex.RUnlock()
+    }()
+    // check services
+    services := map[string]bool{}
+    for _, serv := range logger.Cfg.Observed {
+        _, ok := services[serv.Name]
+        if ok {
+            return fmt.Errorf("Service names should be unique: %v", serv.Name)
+        }
+        services[serv.Name] = true
+    }
+    // check sender fields
+    for k, field := range logger.Cfg.Sender {
+        if len(field) == 0 {
+            return fmt.Errorf("Sender field can't be empty: %v", k)
+        }
+    }
+    return nil
 }
 
 // Initialization of Logger handlers
@@ -128,9 +189,13 @@ func InitConfig(logger *LogChecker, name string) error {
     jsondata, err := ioutil.ReadFile(path)
     if err != nil {
         LoggerError.Println("Can't read config file")
+        return err
     }
-    if err = json.Unmarshal(jsondata, &logger.Cfg); err != nil {
+    // logptr := &logger
+    err = json.Unmarshal(jsondata, &logger.Cfg)
+    if err != nil {
         LoggerError.Println("Can't parse config file")
+        return err
     }
-    return err
+    return logger.Validate()
 }
