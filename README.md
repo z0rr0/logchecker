@@ -4,6 +4,8 @@ It is a simple library to check a list of logs files and send notification about
 
 ### Usage
 
+API descriptions can be found on [godoc](http://godoc.org/github.com/z0rr0/logchecker).
+
 ```go
 import "logchecker"
 import "log"

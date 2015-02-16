@@ -131,14 +131,19 @@ func (logger *LogChecker) Validate() error {
     for _, serv := range logger.Cfg.Observed {
         _, ok := services[serv.Name]
         if ok {
-            return fmt.Errorf("Service names should be unique: %v", serv.Name)
+            return fmt.Errorf("Configuration error, service names should be unique: %v", serv.Name)
         }
         services[serv.Name] = true
     }
     // check sender fields
-    for k, field := range logger.Cfg.Sender {
-        if len(field) == 0 {
-            return fmt.Errorf("Sender field can't be empty: %v", k)
+    mandatory := []string{"user", "password", "host", "addr"}
+    for _, field := range mandatory {
+        v, ok := logger.Cfg.Sender[field]
+        if !ok {
+            return fmt.Errorf("Configuration error, missing sender field: %v", field)
+        }
+        if len(v) == 0 {
+            return fmt.Errorf("Configuration error, Sender field can't be empty: %v", field)
         }
     }
     return nil
