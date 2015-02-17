@@ -53,8 +53,10 @@ func (logger *LogChecker) Start(finished chan bool) {
                 if err := f.Validate(); err != nil {
                     LoggerError.Printf("incorrect file was skipped [%v / %v]\n", serv.Name, f.Base())
                 } else {
-                    pending <- &Task{logger, &serv, &f}
-                    LoggerDebug.Printf("=> added in pending [%v, %v, %v]\n", logger.Name, serv.Name, f.Base())
+                    task := Task{logger, &serv, &f}
+                    task.log("=> added in pending")
+                    pending <- &task
+                    // LoggerDebug.Printf("=> added in pending [%v, %v, %v]\n", logger.Name, serv.Name, f.Base())
                 }
             }
         }
@@ -66,25 +68,27 @@ func (logger *LogChecker) Start(finished chan bool) {
 
 // Poller handles incoming task and places it to output channel.
 func Poller(in chan *Task, out chan *Task) {
-    for t, ok := range in {
+    for t := range in {
+        t.log("start handling")
         if count, pos, err := t.Poll(); err != nil {
-            LoggerDebug.Printf("task was handled incorrect [%v, %v]\n", t.QService.Name, t.QFile.Base())
+            t.log("task was handled incorrect")
         } else {
             t.QFile.Pos = pos
             t.log(fmt.Sprintf("<= task is completed (count=%v, pos=%v)", count, pos))
         }
         if t.QLogChecker.Active {
             out <- t
-        } else {
-            if ok {
-                close(in)
-            }
         }
+        // else {
+        //     if ok {
+        //         close(in)
+        //     }
+        // }
     }
 }
 
 func (task *Task) log(msg string) {
-    LoggerDebug.Printf("%v [%v %v %v]", msg, task.QLogChecker.Name, task.QService.Name, task.QFile.Base())
+    LoggerDebug.Printf("%p (%v): %v [%v %v %v]", task, task, msg, task.QLogChecker.Name, task.QService.Name, task.QFile.Base())
 }
 
 // Poll reads file lines and counts needed from them.
