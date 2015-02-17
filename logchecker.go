@@ -34,7 +34,6 @@ import (
     "log"
     "fmt"
     "sync"
-    "bufio"
     "strings"
     "io/ioutil"
     "encoding/json"
@@ -66,6 +65,8 @@ type File struct {
     Emails []string `json:"emails"`
     Limits []uint   `json:"limits"`
     Counter [3]uint
+    RealLimits []uint
+    Pos uint
 }
 
 // Service is a type of settings for a watched service.
@@ -87,12 +88,28 @@ type LogChecker struct {
     Name string
     Cfg Config
     Backend Backender
+    Active bool
     mutex sync.RWMutex
 }
 
 // MemoryBackend is a type for the implementation of memory storage methods.
 type MemoryBackend struct {
     Name string
+}
+
+// Base returns the last element of log file path.
+func (f *File) Base() string {
+    return filepath.Base(f.Log)
+}
+
+// Validate checks that File is correct: has absolute path and exists.
+func (f *File) Validate() error {
+    var err error
+    if !filepath.IsAbs(f.Log) {
+        return fmt.Errorf("path should be absolute")
+    }
+    _, err = os.Stat(f.Log);
+    return err
 }
 
 // GetName of MemoryBackend returns a name of the logger back-end.
@@ -148,11 +165,6 @@ func (logger *LogChecker) AddService(serv *Service) error {
     return nil
 }
 
-// Watch starts a logger observation.
-// func (logger *LogChecker) Watch() {
-//     pending, complete := make(chan *File), make(chan *File)
-// }
-
 // Validate checks the configuration.
 func (logger *LogChecker) Validate() error {
     logger.mutex.RLock()
@@ -167,6 +179,11 @@ func (logger *LogChecker) Validate() error {
             return fmt.Errorf("service names should be unique [%v]", serv.Name)
         }
         services[serv.Name] = true
+        for _, f := range serv.Files {
+            if err := f.Validate(); err != nil {
+                return fmt.Errorf("file is incorrect [%v] %v", f.Log, err)
+            }
+        }
     }
     // check sender fields
     mandatory := [4]string{"user", "password", "host", "addr"}
@@ -194,35 +211,9 @@ func (logger *LogChecker) Validate() error {
 
 // New created new LogChecker object and returns its reference.
 func New() *LogChecker {
-    return &LogChecker{}
-}
-
-// Poll reads file lines and counts needed from them.
-// It skips "pos" lines.
-func (f *File) Poll(pos int) (int, error) {
-    var counter, clines int
-    file, err := os.Open(f.Log)
-    if err != nil {
-        LoggerError.Printf("can't open file: %v\n", f.Log)
-        return counter, err
-    }
-    defer file.Close()
-    scanner := bufio.NewScanner(file)
-    for scanner.Scan() {
-        clines++
-        if pos < clines {
-            if line := scanner.Text(); line != "" {
-                if len(f.Pattern) > 0 {
-                    if strings.Contains(line, f.Pattern) {
-                        counter++
-                    }
-                } else {
-                    counter++
-                }
-            }
-        }
-    }
-    return counter, nil
+    res := &LogChecker{}
+    res.Name = "LogChecker"
+    return res
 }
 
 // DebugMode is a initialization of Logger handlers.

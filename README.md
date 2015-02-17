@@ -2,6 +2,8 @@
 
 It is a simple library to check a list of logs files and send notification about their abnormal activities.
 
+**IMPORTANT:** _**It is in development now.**_
+
 ### Usage
 
 API descriptions can be found on [godoc.org](http://godoc.org/github.com/z0rr0/logchecker).
