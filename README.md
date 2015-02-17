@@ -41,7 +41,7 @@ Files for observation can be added using a configuration file, see examples in [
           "delay": 180,                         // delay between checks
           "pattern": "ERROR",                   // to account lines with the pattern
           "boundary": 1,                        // send email if sum greater than boundary value
-          "increasing": true,                   // increase boundary value as 2^n
+          "increase": true,                     // increase boundary value as 2^n
           "emails": ["user_1@host.com"],        // send email to these users
           "limist": [10, 20, 100]               // emails' limits: per hour / day / week
         }
