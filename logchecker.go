@@ -34,6 +34,7 @@ import (
     "log"
     "fmt"
     "sync"
+    "bufio"
     "strings"
     "io/ioutil"
     "encoding/json"
@@ -149,10 +150,9 @@ func (logger *LogChecker) AddService(serv *Service) error {
 }
 
 // Watch starts a logger observation.
-func (logger *LogChecker) Watch() {
-    pending, complete := make(chan *File), make(chan *File)
-
-}
+// func (logger *LogChecker) Watch() {
+//     pending, complete := make(chan *File), make(chan *File)
+// }
 
 // Validate checks the configuration.
 func (logger *LogChecker) Validate() error {
@@ -193,6 +193,39 @@ func (logger *LogChecker) Validate() error {
     return nil
 }
 
+// New created new LogChecker object and returns its reference.
+func New() *LogChecker {
+    return &LogChecker{}
+}
+
+// Poll reads file lines and counts needed from them.
+// It skips "pos" lines.
+func (f *File) Poll(pos int) (int, error) {
+    var counter, clines int
+    file, err := os.Open(f.Log)
+    if err != nil {
+        LoggerError.Printf("can't open file: %v\n", f.Log)
+        return counter, err
+    }
+    defer file.Close()
+    scanner := bufio.NewScanner(file)
+    for scanner.Scan() {
+        clines++
+        if pos < clines {
+            if line := scanner.Text(); line != "" {
+                if len(f.Pattern) > 0 {
+                    if strings.Contains(line, f.Pattern) {
+                        counter++
+                    }
+                } else {
+                    counter++
+                }
+            }
+        }
+    }
+    return counter, nil
+}
+
 // DebugMode is a initialization of Logger handlers.
 func DebugMode(debugmode bool) {
     debugHandle := ioutil.Discard
@@ -201,11 +234,6 @@ func DebugMode(debugmode bool) {
     }
     LoggerDebug = log.New(debugHandle, "LogChecker DEBUG: ",
         log.Ldate|log.Lmicroseconds|log.Lshortfile)
-}
-
-// New created new LogChecker object and returns its reference.
-func New() *LogChecker {
-    return &LogChecker{}
 }
 
 // FilePath validates file name, converts its path from relative to absolute
