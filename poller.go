@@ -16,8 +16,8 @@ import (
 )
 
 const (
-    maxpollers int = 32
-    buffsize int = 8
+    maxpollers int = 64
+    // buffsize int = 8
 )
 
 type Task struct {
@@ -30,13 +30,14 @@ type Task struct {
 // after that it will not run new tasks and notify then incoming queue will be empty
 // a work can be finished with any problems.
 func (logger *LogChecker) Stop() {
-    logger.Active = false
+    LoggerDebug.Println("stop command is gooten")
+    logger.Completed = true
 }
 
 // Start starts a logger observation.
 func (logger *LogChecker) Start(finished chan bool) {
     var poll_size int = maxpollers
-    logger.Active = true
+    logger.Completed = false
     if len(logger.Cfg.Observed) < poll_size {
         poll_size = len(logger.Cfg.Observed)
     }
@@ -44,51 +45,49 @@ func (logger *LogChecker) Start(finished chan bool) {
     pending, complete := make(chan *Task), make(chan *Task)
     // start tasks
     for i := 0; i < poll_size; i++ {
-        go Poller(pending, complete)
+        go Poller(pending, complete, finished)
     }
     // put tasks to pending channel
     go func() {
-        for _, serv := range logger.Cfg.Observed {
-            for _, f := range serv.Files {
+        for i, serv := range logger.Cfg.Observed {
+            for j, f := range serv.Files {
                 if err := f.Validate(); err != nil {
                     LoggerError.Printf("incorrect file was skipped [%v / %v]\n", serv.Name, f.Base())
                 } else {
-                    task := Task{logger, &serv, &f}
-                    task.log("=> added in pending")
+                    task := Task{logger, &logger.Cfg.Observed[i], &serv.Files[j]}
                     pending <- &task
-                    // LoggerDebug.Printf("=> added in pending [%v, %v, %v]\n", logger.Name, serv.Name, f.Base())
+                    task.log("=> added in pending")
                 }
             }
         }
     }()
     for task := range complete {
-        go task.Sleep(pending, finished)
+        go task.Sleep(pending)
     }
 }
 
 // Poller handles incoming task and places it to output channel.
-func Poller(in chan *Task, out chan *Task) {
-    for t := range in {
-        t.log("start handling")
+func Poller(in chan *Task, out chan *Task, finished chan bool) {
+    for {
+        t, ok := <-in
+        if !ok {
+            LoggerDebug.Println("channel was closed")
+            break
+        }
+        t.log("handling start")
         if count, pos, err := t.Poll(); err != nil {
             t.log("task was handled incorrect")
         } else {
             t.QFile.Pos = pos
             t.log(fmt.Sprintf("<= task is completed (count=%v, pos=%v)", count, pos))
         }
-        if t.QLogChecker.Active {
-            out <- t
-        }
-        // else {
-        //     if ok {
-        //         close(in)
-        //     }
-        // }
+        out <- t
     }
+    finished <- true
 }
 
 func (task *Task) log(msg string) {
-    LoggerDebug.Printf("%p (%v): %v [%v %v %v]", task, task, msg, task.QLogChecker.Name, task.QService.Name, task.QFile.Base())
+    LoggerDebug.Printf("%p: [%v %v %v] %v\n", task, task.QLogChecker.Name, task.QService.Name, task.QFile.Base(), msg)
 }
 
 // Poll reads file lines and counts needed from them.
@@ -120,13 +119,17 @@ func (task *Task) Poll() (uint, uint, error) {
 }
 
 // Sleep delays next task running.
-func (task *Task) Sleep(done chan *Task, finished chan bool) {
+func (task *Task) Sleep(done chan *Task) {
     task.log("sleep called")
-    time.Sleep(time.Duration(task.QFile.Delay) * time.Second)
-    if task.QLogChecker.Active {
+    if !task.QLogChecker.Completed {
+        time.Sleep(time.Duration(task.QFile.Delay) * time.Second)
         done <- task
     } else {
-        close(done)
-        finished <- true
+        task.QLogChecker.mutex.Lock()
+        if !task.QLogChecker.Finished {
+            task.QLogChecker.Finished = true
+            close(done)
+        }
+        task.QLogChecker.mutex.Unlock()
     }
 }
