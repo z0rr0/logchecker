@@ -16,10 +16,12 @@ import (
 )
 
 const (
-    maxpollers int = 64
+    // MaxPollers is maximum number of task handlers.
+    MaxPollers int = 64
     // buffsize int = 8
 )
 
+// Task is an object of logging task.
 type Task struct {
     QLogChecker *LogChecker
     QService *Service
@@ -36,15 +38,15 @@ func (logger *LogChecker) Stop() {
 
 // Start starts a logger observation.
 func (logger *LogChecker) Start(finished chan bool) {
-    var poll_size int = maxpollers
+    var poolSize = MaxPollers
     logger.Completed = false
-    if len(logger.Cfg.Observed) < poll_size {
-        poll_size = len(logger.Cfg.Observed)
+    if len(logger.Cfg.Observed) < poolSize {
+        poolSize = len(logger.Cfg.Observed)
     }
     // create incoming and output channels
     pending, complete := make(chan *Task), make(chan *Task)
     // start tasks
-    for i := 0; i < poll_size; i++ {
+    for i := 0; i < poolSize; i++ {
         go Poller(pending, complete, finished)
     }
     // put tasks to pending channel
