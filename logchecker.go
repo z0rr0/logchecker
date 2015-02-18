@@ -93,6 +93,7 @@ type LogChecker struct {
     Backend Backender
     Completed bool
     Finished bool
+    InWork int
     mutex sync.RWMutex
 }
 

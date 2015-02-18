@@ -17,7 +17,7 @@ import (
 
 const (
     // MaxPollers is maximum number of task handlers.
-    MaxPollers int = 64
+    MaxPollers int = 5
     // buffsize int = 8
 )
 
@@ -40,9 +40,9 @@ func (logger *LogChecker) Stop() {
 func (logger *LogChecker) Start(finished chan bool) {
     var poolSize = MaxPollers
     logger.Completed = false
-    if len(logger.Cfg.Observed) < poolSize {
-        poolSize = len(logger.Cfg.Observed)
-    }
+    // if len(logger.Cfg.Observed) < poolSize {
+    //     poolSize = len(logger.Cfg.Observed)
+    // }
     // create incoming and output channels
     pending, complete := make(chan *Task), make(chan *Task)
     // start tasks
@@ -70,22 +70,30 @@ func (logger *LogChecker) Start(finished chan bool) {
 
 // Poller handles incoming task and places it to output channel.
 func Poller(in chan *Task, out chan *Task, finished chan bool) {
+    var logger *LogChecker
     for {
         t, ok := <-in
         if !ok {
             LoggerDebug.Println("channel was closed")
             break
         }
-        t.log("handling start")
+        if logger == nil {
+            logger = t.QLogChecker
+        }
+        t.log("=> handling start")
+        logger.InWork++
         if count, pos, err := t.Poll(); err != nil {
             t.log("task was handled incorrect")
         } else {
             t.QFile.Pos = pos
             t.log(fmt.Sprintf("<= task is completed (count=%v, pos=%v)", count, pos))
         }
+        logger.InWork--
         out <- t
     }
-    finished <- true
+    if (logger != nil) && (logger.InWork == 0) {
+        finished <- true
+    }
 }
 
 func (task *Task) log(msg string) {
@@ -95,6 +103,8 @@ func (task *Task) log(msg string) {
 // Poll reads file lines and counts needed from them.
 // It skips "pos" lines.
 func (task *Task) Poll() (uint, uint, error) {
+    task.log("Poll start")
+    time.Sleep(4*time.Second)
     var counter, clines uint
     file, err := os.Open(task.QFile.Log)
     if err != nil {
@@ -117,6 +127,7 @@ func (task *Task) Poll() (uint, uint, error) {
             }
         }
     }
+    task.log("Poll finish")
     return counter, clines, nil
 }
 
