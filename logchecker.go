@@ -83,12 +83,17 @@ type Config struct {
     Storage string            `json:"storage"`
 }
 
-// LogChecker is a main object for logging.
+// LogChecker is a main object for logging. It is completed
+// when stop commnad was called. It is finished when tasks were done
+// and the pending channel was closed. LogChecker is finished only
+// if it is completed.
 type LogChecker struct {
     Name string
     Cfg Config
     Backend Backender
-    Active bool
+    Completed bool
+    Finished bool
+    InWork int
     mutex sync.RWMutex
 }
 
@@ -212,6 +217,7 @@ func (logger *LogChecker) Validate() error {
 // New created new LogChecker object and returns its reference.
 func New() *LogChecker {
     res := &LogChecker{}
+    res.Finished = false
     res.Name = "LogChecker"
     return res
 }
