@@ -21,6 +21,7 @@ const (
 )
 
 type Task struct {
+    Num int
     QLogChecker *LogChecker
     QService *Service
     QFile *File
@@ -47,19 +48,40 @@ func (logger *LogChecker) Start(finished chan bool) {
         go Poller(pending, complete)
     }
     // put tasks to pending channel
-    go func() {
-        for _, serv := range logger.Cfg.Observed {
-            for _, f := range serv.Files {
-                if err := f.Validate(); err != nil {
-                    LoggerError.Printf("incorrect file was skipped [%v / %v]\n", serv.Name, f.Base())
-                } else {
-                    task := Task{logger, &serv, &f}
-                    task.log("=> added in pending")
-                    pending <- &task
-                    // LoggerDebug.Printf("=> added in pending [%v, %v, %v]\n", logger.Name, serv.Name, f.Base())
-                }
+    tasks, j := []*Task{}, 0
+    for _, serv := range logger.Cfg.Observed {
+        for _, f := range serv.Files {
+            if err := f.Validate(); err != nil {
+                LoggerError.Printf("incorrect file was skipped [%v / %v]\n", serv.Name, f.Base())
+            } else {
+                ts, tf := &serv, &f
+                fmt.Println("pt: ", ts, tf)
+                tasks = append(tasks, &Task{j, logger, &serv, &f})
+                j++
+                fmt.Println(tasks[j-1])
             }
         }
+    }
+    fmt.Println(tasks)
+
+
+    go func() {
+        for _, task := range tasks {
+            pending <- task
+            task.log("=> added in pending")
+        }
+
+        // for _, serv := range logger.Cfg.Observed {
+        //     for _, f := range serv.Files {
+        //         if err := f.Validate(); err != nil {
+        //             LoggerError.Printf("incorrect file was skipped [%v / %v]\n", serv.Name, f.Base())
+        //         } else {
+        //             j++
+        //             task := Task{j, logger, &serv, &f}
+        //             // LoggerDebug.Printf("=> added in pending [%v, %v, %v]\n", logger.Name, serv.Name, f.Base())
+        //         }
+        //     }
+        // }
     }()
     for task := range complete {
         go task.Sleep(pending, finished)
@@ -88,7 +110,7 @@ func Poller(in chan *Task, out chan *Task) {
 }
 
 func (task *Task) log(msg string) {
-    LoggerDebug.Printf("%p (%v): %v [%v %v %v]", task, task, msg, task.QLogChecker.Name, task.QService.Name, task.QFile.Base())
+    LoggerDebug.Printf("%p-%v (%v): %v [%v %v %v]", task, task.Num, task, msg, task.QLogChecker.Name, task.QService.Name, task.QFile.Base())
 }
 
 // Poll reads file lines and counts needed from them.
