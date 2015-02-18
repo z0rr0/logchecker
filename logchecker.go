@@ -34,7 +34,9 @@ import (
     "log"
     "fmt"
     "sync"
+    "time"
     "strings"
+    "net/smtp"
     "io/ioutil"
     "encoding/json"
     "path/filepath"
@@ -63,10 +65,12 @@ type File struct {
     Boundary uint   `json:"boundary"`
     Increase bool   `json:"increase"`
     Emails []string `json:"emails"`
-    Limits []uint   `json:"limits"`
+    Limits [3]uint   `json:"limits"`
     Counter [3]uint
-    RealLimits []uint
+    RealLimits [3]uint
     Pos uint
+    Begin time.Time
+    ModTime time.Time
 }
 
 // Service is a type of settings for a watched service.
@@ -155,6 +159,9 @@ func (logger *LogChecker) HasService(serv *Service, lock bool) bool {
 
 // AddService includes a new Service to the LogChecker.
 func (logger *LogChecker) AddService(serv *Service) error {
+    if logger.Works() {
+        return fmt.Errorf("logchecker is already running")
+    }
     logger.mutex.Lock()
     defer func() {
         logger.mutex.Unlock()
@@ -214,11 +221,24 @@ func (logger *LogChecker) Validate() error {
     return nil
 }
 
+// Notify sends a prepared email message.
+func (logger *LogChecker) Notify(msg string, to []string) error {
+    const mime string = "MIME-version: 1.0;\nContent-Type: text/plain; charset=\"UTF-8\";\n\n";
+    content := []byte("Subject: LogChecker notification\n" + mime + msg)
+    auth := smtp.PlainAuth(
+        "",
+        logger.Cfg.Sender["user"],
+        logger.Cfg.Sender["password"],
+        logger.Cfg.Sender["host"],
+    )
+    return smtp.SendMail(logger.Cfg.Sender["addr"], auth, logger.Cfg.Sender["user"], to, content)
+}
+
 // New created new LogChecker object and returns its reference.
 func New() *LogChecker {
     res := &LogChecker{}
-    res.Finished = false
     res.Name = "LogChecker"
+    res.Completed, res.Finished = true, true
     return res
 }
 
@@ -253,6 +273,9 @@ func FilePath(name string) (string, error) {
 
 // InitConfig initializes configuration from a file.
 func InitConfig(logger *LogChecker, name string) error {
+    if logger.Works() {
+        return fmt.Errorf("logchecker is already running")
+    }
     path, err := FilePath(name)
     if err != nil {
         LoggerError.Println("Can't check config file")
@@ -271,3 +294,5 @@ func InitConfig(logger *LogChecker, name string) error {
     }
     return logger.Validate()
 }
+
+

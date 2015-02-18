@@ -18,12 +18,10 @@ import (
 const (
     // MaxPollers is maximum number of task handlers.
     MaxPollers int = 5
-    // buffsize int = 8
 )
 
 // Task is an object of logging task.
 type Task struct {
-    Num int
     QLogChecker *LogChecker
     QService *Service
     QFile *File
@@ -33,17 +31,27 @@ type Task struct {
 // after that it will not run new tasks and notify then incoming queue will be empty
 // a work can be finished with any problems.
 func (logger *LogChecker) Stop() {
-    LoggerDebug.Println("stop command is gooten")
     logger.Completed = true
+    LoggerDebug.Println("complete flag is set")
+}
+
+// Works checks that LogChecker in already running.
+func (logger *LogChecker) Works() bool {
+    LoggerDebug.Println(logger.Completed, logger.Finished)
+    return (!logger.Completed) || (!logger.Finished)
 }
 
 // Start starts a logger observation.
 func (logger *LogChecker) Start(finished chan bool) {
-    var poolSize = MaxPollers
-    logger.Completed = false
-    // if len(logger.Cfg.Observed) < poolSize {
-    //     poolSize = len(logger.Cfg.Observed)
-    // }
+    if logger.Works() {
+        finished <- false
+        return
+    }
+    poolSize := MaxPollers
+    logger.Completed, logger.Finished = false, false
+    if len(logger.Cfg.Observed) < poolSize {
+        poolSize = len(logger.Cfg.Observed)
+    }
     // create incoming and output channels
     pending, complete := make(chan *Task), make(chan *Task)
     // start tasks
@@ -57,33 +65,13 @@ func (logger *LogChecker) Start(finished chan bool) {
                 if err := f.Validate(); err != nil {
                     LoggerError.Printf("incorrect file was skipped [%v / %v]\n", serv.Name, f.Base())
                 } else {
-                    task := Task{logger, &logger.Cfg.Observed[i], &serv.Files[j]}
-                    pending <- &task
-                    task.log("=> added in pending")
+                    serv.Files[j].Begin = time.Now()
+                    serv.Files[j].RealLimits = serv.Files[j].Limits
+                    serv.Files[j].ModTime = time.Date(1970, time.January, 1, 0, 0, 1, 0, time.UTC )
+                    pending <- &Task{logger, &logger.Cfg.Observed[i], &serv.Files[j]}
                 }
             }
         }
-    }
-    fmt.Println(tasks)
-
-
-    go func() {
-        for _, task := range tasks {
-            pending <- task
-            task.log("=> added in pending")
-        }
-
-        // for _, serv := range logger.Cfg.Observed {
-        //     for _, f := range serv.Files {
-        //         if err := f.Validate(); err != nil {
-        //             LoggerError.Printf("incorrect file was skipped [%v / %v]\n", serv.Name, f.Base())
-        //         } else {
-        //             j++
-        //             task := Task{j, logger, &serv, &f}
-        //             // LoggerDebug.Printf("=> added in pending [%v, %v, %v]\n", logger.Name, serv.Name, f.Base())
-        //         }
-        //     }
-        // }
     }()
     for task := range complete {
         go task.Sleep(pending)
@@ -96,20 +84,20 @@ func Poller(in chan *Task, out chan *Task, finished chan bool) {
     for {
         t, ok := <-in
         if !ok {
-            LoggerDebug.Println("channel was closed")
             break
         }
         if logger == nil {
             logger = t.QLogChecker
         }
-        t.log("=> handling start")
         logger.InWork++
+        t.log("=> poll enter")
         if count, pos, err := t.Poll(); err != nil {
             t.log("task was handled incorrect")
         } else {
             t.QFile.Pos = pos
-            t.log(fmt.Sprintf("<= task is completed (count=%v, pos=%v)", count, pos))
+            t.log(fmt.Sprintf("poll is completed (count=%v, pos=%v)", count, pos))
         }
+        t.log("<= poll exit")
         logger.InWork--
         out <- t
     }
@@ -122,11 +110,15 @@ func (task *Task) log(msg string) {
     LoggerDebug.Printf("%p: [%v %v %v] %v\n", task, task.QLogChecker.Name, task.QService.Name, task.QFile.Base(), msg)
 }
 
+// Check validates conditions before sending email notifications.
+func (f *File) Check(count uint) (string, error) {
+    // period := time.Since(f.Begin)
+    return "", nil
+}
+
 // Poll reads file lines and counts needed from them.
 // It skips "pos" lines.
 func (task *Task) Poll() (uint, uint, error) {
-    task.log("Poll start")
-    time.Sleep(4*time.Second)
     var counter, clines uint
     file, err := os.Open(task.QFile.Log)
     if err != nil {
@@ -134,6 +126,16 @@ func (task *Task) Poll() (uint, uint, error) {
         return counter, clines, err
     }
     defer file.Close()
+    // info, err := file.Stat()
+    // if err != nil {
+    //     return counter, clines, err
+    // }
+    // mod := time.Since(info.ModTime())
+    // if mod. <= task.QFile.ModTime {
+    //     task.log("file not changed")
+    //     return counter, clines, nil
+    // }
+
     scanner := bufio.NewScanner(file)
     for scanner.Scan() {
         clines++
@@ -149,14 +151,13 @@ func (task *Task) Poll() (uint, uint, error) {
             }
         }
     }
-    task.log("Poll finish")
     return counter, clines, nil
 }
 
 // Sleep delays next task running.
 func (task *Task) Sleep(done chan *Task) {
-    task.log("sleep called")
     if !task.QLogChecker.Completed {
+        task.log("sleep")
         time.Sleep(time.Duration(task.QFile.Delay) * time.Second)
         done <- task
     } else {
