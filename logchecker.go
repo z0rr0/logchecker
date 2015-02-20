@@ -69,11 +69,11 @@ type File struct {
     Increase bool   `json:"increase"`
     Emails []string `json:"emails"`
     Limits [3]uint   `json:"limits"`
-    Counter [3]uint
+    Counters [3]uint64
     RealLimits [3]uint
+    Periods [3]time.Time
     Pos uint
-    Begin time.Time   // 1970-01-01 00:00:01.000 UTC
-    ModTime time.Time // 1970-01-01 00:00:00.000 UTC
+    ModTime time.Time
 }
 
 // Service is a type of settings for a watched service.
@@ -299,7 +299,6 @@ func (logger *LogChecker) Start(finished chan bool) {
                 if err := f.Validate(); err != nil {
                     LoggerError.Printf("incorrect file was skipped [%v / %v]\n", serv.Name, f.Base())
                 } else {
-                    serv.Files[j].Begin = time.Now()
                     serv.Files[j].RealLimits = serv.Files[j].Limits
                     pending <- &Task{logger, &logger.Cfg.Observed[i], &serv.Files[j]}
                 }
@@ -309,6 +308,11 @@ func (logger *LogChecker) Start(finished chan bool) {
     for task := range complete {
         go task.Sleep(pending)
     }
+}
+
+// String returns main text info about the task.
+func (task *Task) String() string {
+    return fmt.Sprintf("%v-%v-%v", task.QLogChecker.Name, task.QService.Name, task.QFile.Base())
 }
 
 // Sleep delays next task running.
@@ -435,10 +439,13 @@ func Poller(in chan *Task, out chan *Task, finished chan bool) {
         logger.InWork++
         t.log("=> poll enter")
         if count, pos, err := t.Poll(); err != nil {
-            t.log("task was handled incorrect")
+            LoggerError.Printf("poll is incorrect [%v]", t)
         } else {
-            t.QFile.Pos = pos
             t.log(fmt.Sprintf("poll is completed (count=%v, pos=%v)", count, pos))
+            t.QFile.Pos = pos
+            if err := t.Check(count); err != nil {
+                LoggerError.Printf("task is not checked [%v]: %v", t, err)
+            }
         }
         t.log("<= poll exit")
         logger.InWork--
@@ -447,4 +454,17 @@ func Poller(in chan *Task, out chan *Task, finished chan bool) {
     if (logger != nil) && (logger.InWork == 0) {
         finished <- true
     }
+}
+
+// Check calculates currnet found abnormal records for time periods
+func (task *Task) Check(count uint) error {
+    for i, _ := range task.QFile.Counters {
+        task.QFile.Counters[i] += uint64(count)
+    }
+    // now := time.Now()
+    // for _, p :=  range task.QFile.Periods {
+
+    // }
+
+    return nil
 }
