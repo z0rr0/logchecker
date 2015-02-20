@@ -62,18 +62,19 @@ type Backender interface {
 
 // File is a type of settings for a watched file.
 type File struct {
-    Log string      `json:"file"`
-    Delay uint      `json:"delay"`
-    Pattern string  `json:"pattern"`
-    Boundary uint   `json:"boundary"`
-    Increase bool   `json:"increase"`
-    Emails []string `json:"emails"`
-    Limits [3]uint   `json:"limits"`
-    Counters [3]uint64
-    RealLimits [3]uint
-    Periods [3]time.Time
-    Pos uint
-    ModTime time.Time
+    Log string            `json:"file"`
+    Delay uint            `json:"delay"`
+    Pattern string        `json:"pattern"`
+    Boundary uint         `json:"boundary"`
+    Increase bool         `json:"increase"`
+    Emails []string       `json:"emails"`
+    Limits [3]uint64      `json:"limits"`
+    Counters [3]uint64    // counter for every periond
+    RealLimits [3]uint64  // real conter after possible increasing
+    Periods [3]uint64     // hours after start
+    Pos uint64            // file posision after last check
+    ModTime time.Time     // file modify date during last check
+    LogStart time.Time    // time of logger start
 }
 
 // Service is a type of settings for a watched service.
@@ -299,7 +300,7 @@ func (logger *LogChecker) Start(finished chan bool) {
                 if err := f.Validate(); err != nil {
                     LoggerError.Printf("incorrect file was skipped [%v / %v]\n", serv.Name, f.Base())
                 } else {
-                    serv.Files[j].RealLimits = serv.Files[j].Limits
+                    serv.Files[j].RealLimits, serv.Files[j].LogStart = serv.Files[j].Limits, time.Now()
                     pending <- &Task{logger, &logger.Cfg.Observed[i], &serv.Files[j]}
                 }
             }
@@ -333,20 +334,20 @@ func (task *Task) Sleep(done chan *Task) {
 
 // Poll reads file lines and counts needed from them.
 // It skips "pos" lines.
-func (task *Task) Poll() (uint, uint, error) {
-    var counter, clines uint
+func (task *Task) Poll() (uint64, error) {
+    var counter, clines uint64
     info, err := os.Stat(task.QFile.Log)
     if err != nil {
-        return counter, clines, err
+        return counter, err
     }
     if task.QFile.ModTime.Equal(info.ModTime()) {
         // file is not chnaged
-        return counter, clines, nil
+        return counter, nil
     }
     file, err := os.Open(task.QFile.Log)
     if err != nil {
         LoggerError.Printf("can't open file: %v\n", task.QFile.Log)
-        return counter, clines, err
+        return counter, err
     }
     defer file.Close()
     // read file line by line
@@ -365,7 +366,33 @@ func (task *Task) Poll() (uint, uint, error) {
             }
         }
     }
-    return counter, clines, nil
+    task.QFile.Pos = clines
+    task.QFile.ModTime = info.ModTime()
+    return counter, nil
+}
+
+// Check calculates currnet found abnormal records for time periods
+func (task *Task) Check(count uint64) error {
+    for i, _ := range task.QFile.Counters {
+        task.QFile.Counters[i] += uint64(count)
+    }
+    hours := uint64(time.Since(task.QFile.LogStart).Hours())
+    days := hours % 24
+    weeks := days % 7
+    switch {
+        case weeks != task.QFile.Periods[2]:
+            task.QFile.Periods[2] = weeks
+            task.QFile.Periods[1] = days
+            task.QFile.Periods[0] = hours
+        case days != task.QFile.Periods[1]:
+            task.QFile.Periods[1] = days
+            task.QFile.Periods[0] = hours
+        default:
+            task.QFile.Periods[0] = hours
+    }
+    // task.QFile.RealLimits
+
+    return nil
 }
 
 func (task *Task) log(msg string) {
@@ -438,11 +465,10 @@ func Poller(in chan *Task, out chan *Task, finished chan bool) {
         }
         logger.InWork++
         t.log("=> poll enter")
-        if count, pos, err := t.Poll(); err != nil {
+        if count, err := t.Poll(); err != nil {
             LoggerError.Printf("poll is incorrect [%v]", t)
         } else {
-            t.log(fmt.Sprintf("poll is completed (count=%v, pos=%v)", count, pos))
-            t.QFile.Pos = pos
+            t.log(fmt.Sprintf("poll is completed (%v)", count))
             if err := t.Check(count); err != nil {
                 LoggerError.Printf("task is not checked [%v]: %v", t, err)
             }
@@ -454,17 +480,4 @@ func Poller(in chan *Task, out chan *Task, finished chan bool) {
     if (logger != nil) && (logger.InWork == 0) {
         finished <- true
     }
-}
-
-// Check calculates currnet found abnormal records for time periods
-func (task *Task) Check(count uint) error {
-    for i, _ := range task.QFile.Counters {
-        task.QFile.Counters[i] += uint64(count)
-    }
-    // now := time.Now()
-    // for _, p :=  range task.QFile.Periods {
-
-    // }
-
-    return nil
 }
