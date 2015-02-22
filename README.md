@@ -6,7 +6,7 @@ It is a simple library to check a list of logs files and send notification about
 
 [![GoDoc](https://godoc.org/github.com/z0rr0/logchecker?status.svg)](https://godoc.org/github.com/z0rr0/logchecker)
 
-<!-- [![Build Status](https://travis-ci.org/z0rr0/logchecker.svg?branch=master)](https://travis-ci.org/z0rr0/logchecker) -->
+[![Build Status](https://travis-ci.org/z0rr0/logchecker.svg?branch=master)](https://travis-ci.org/z0rr0/logchecker)
 
 ### Usage
 
