@@ -10,6 +10,8 @@ import (
     "os"
     // "fmt"
     "testing"
+    "strings"
+    "io/ioutil"
     "path/filepath"
 )
 
@@ -28,6 +30,20 @@ func createFile(name string, mode int) (*os.File, error) {
     }
     return file, file.Chmod(os.FileMode(mode))
 }
+
+func prepareConfig(from, to string, replace map[string]string) error {
+    // newfiles := [3]string("error.log", "access.log", "syslog")
+    data, err := ioutil.ReadFile(from)
+    if err != nil {
+        return err
+    }
+    strinfo := string(data)
+    for k, v := range replace {
+        strinfo = strings.Replace(strinfo, k, v, 1)
+    }
+    return ioutil.WriteFile(to, []byte(strinfo), os.FileMode(0666))
+}
+
 
 func TestDebugMode(t *testing.T) {
     if (LoggerError == nil) || (LoggerDebug == nil) {
@@ -126,8 +142,24 @@ func TestFilePath(t *testing.T) {
 
 func TestInitConfig(t *testing.T) {
     testdir := buildDir()
+    newvalues := map[string]string{
+        "/var/log/nginx/error.log": filepath.Join(testdir, "error.log"),
+        "/var/log/nginx/access.log": filepath.Join(testdir, "access.log"),
+        "/var/log/syslog": filepath.Join(testdir, "syslog"),
+    }
+    oldexample := filepath.Join(testdir, "config.example.json")
+    example := filepath.Join(testdir, "config.new.json")
+    if err := prepareConfig(oldexample, example, newvalues); err != nil {
+        t.Errorf("can't prepare test config file [%v]", err)
+    }
+    defer os.Remove(example)
+    for _, v := range newvalues {
+        if _, err := createFile(v, 0666); err != nil {
+            t.Errorf("test file preparation error [%v]", err)
+        }
+        defer os.Remove(v)
+    }
     logger := New()
-    example := filepath.Join(testdir, "config.example.json")
     if err := InitConfig(logger, example); err != nil {
         t.Errorf("error during InitConfig [%v]: %v", example, err)
     }
@@ -150,9 +182,7 @@ func TestInitConfig(t *testing.T) {
     if err != nil {
         t.Errorf("%v", err)
     }
-    defer func() {
-        os.Remove(testfile)
-    }()
+    defer os.Remove(testfile)
 
     if err := InitConfig(logger, testfile); err == nil {
         t.Errorf("need permissions error during InitConfig")
