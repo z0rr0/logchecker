@@ -129,7 +129,7 @@ func TestInitConfig(t *testing.T) {
     logger := New()
     example := filepath.Join(testdir, "config.example.json")
     if err := InitConfig(logger, example); err != nil {
-        t.Errorf("error during InitConfig")
+        t.Errorf("error during InitConfig [%v]: %v", example, err)
     }
 
     if len(logger.Cfg.Observed) > 1 {
@@ -139,7 +139,7 @@ func TestInitConfig(t *testing.T) {
         }
     }
     if l := len(logger.Cfg.String()); l <= 0 {
-        t.Errorf("config should be initiated")
+        t.Errorf("config should be initiated [%v]", l)
     }
     if err := InitConfig(logger, "invalid_name"); err == nil {
         t.Errorf("need error during InitConfig")
