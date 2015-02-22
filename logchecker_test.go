@@ -13,6 +13,14 @@ import (
     "path/filepath"
 )
 
+func createFile(name string, mode int) (*os.File, error) {
+    file, err := os.Create(name)
+    if err != nil {
+        return nil, err
+    }
+    return file, file.Chmod(os.FileMode(mode))
+}
+
 func TestDebugMode(t *testing.T) {
     if (LoggerError == nil) || (LoggerDebug == nil) {
         t.Errorf("incorrect references")
@@ -112,8 +120,9 @@ func TestFilePath(t *testing.T) {
 }
 
 func TestInitConfig(t *testing.T) {
+    testdir := filepath.Join(os.Getenv("GOPATH"), "src/github.com/z0rr0/logchecker")
     logger := New()
-    example := filepath.Join(os.Getenv("GOPATH"), "src/github.com/z0rr0/logchecker/config.example.json")
+    example := filepath.Join(testdir, "config.example.json")
     if err := InitConfig(logger, example); err != nil {
         t.Errorf("error during InitConfig")
     }
@@ -130,9 +139,21 @@ func TestInitConfig(t *testing.T) {
     if err := InitConfig(logger, "invalid_name"); err == nil {
         t.Errorf("need error during InitConfig")
     }
-    if err := InitConfig(logger, "/etc/shadow"); err == nil {
+
+    testfile := filepath.Join(testdir, "testfile.json")
+    f, err := createFile(testfile, 0200);
+    if err != nil {
+        t.Errorf("%v", err)
+    }
+    defer func() {
+        os.Remove(testfile)
+    }()
+
+    if err := InitConfig(logger, testfile); err == nil {
         t.Errorf("need permissions error during InitConfig")
     }
+
+    f.Chmod(0600)
     if err := InitConfig(logger, "/etc/passwd"); err == nil {
         t.Errorf("need json error during InitConfig")
     }

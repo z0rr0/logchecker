@@ -371,24 +371,37 @@ func (task *Task) Poll() (uint64, error) {
     return counter, nil
 }
 
+func checklimit(i int, c uint64, ) {
+
+}
+
 // Check calculates currnet found abnormal records for time periods
 func (task *Task) Check(count uint64) error {
-    for i, _ := range task.QFile.Counters {
+    for i := range task.QFile.Counters {
         task.QFile.Counters[i] += uint64(count)
     }
+    news := [3]bool{false, false, false}
     hours := uint64(time.Since(task.QFile.LogStart).Hours())
     days := hours % 24
     weeks := days % 7
     switch {
         case weeks != task.QFile.Periods[2]:
+            task.QFile.Periods[0] = hours
+            task.QFile.Periods[1] = days
             task.QFile.Periods[2] = weeks
-            task.QFile.Periods[1] = days
-            task.QFile.Periods[0] = hours
+            news = [3]bool{true, true, true}
+
+            task.QFile.Counters = [3]uint64{0,0,0}
         case days != task.QFile.Periods[1]:
-            task.QFile.Periods[1] = days
             task.QFile.Periods[0] = hours
+            task.QFile.Periods[1] = days
+            task.QFile.Counters[0] = 0
+            task.QFile.Counters[1] = 0
+            news[0], news[1] = true, true
         default:
             task.QFile.Periods[0] = hours
+            task.QFile.Counters[0] = 0
+            news[0] = true
     }
     // task.QFile.RealLimits
 
