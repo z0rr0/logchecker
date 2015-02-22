@@ -4,6 +4,10 @@ It is a simple library to check a list of logs files and send notification about
 
 **IMPORTANT:** _**It is in development now.**_
 
+[![GoDoc](https://godoc.org/github.com/z0rr0/logchecker?status.svg)](https://godoc.org/github.com/z0rr0/logchecker)
+
+<!-- [![Build Status](https://travis-ci.org/z0rr0/logchecker.svg?branch=master)](https://travis-ci.org/z0rr0/logchecker) -->
+
 ### Usage
 
 API descriptions can be found on [godoc.org](http://godoc.org/github.com/z0rr0/logchecker).
@@ -19,7 +23,6 @@ if err := logchecker.InitConfig(logger, "config.json"); err != nil {
 }
 ```
 
-[![GoDoc](https://godoc.org/github.com/z0rr0/logchecker?status.svg)](https://godoc.org/github.com/z0rr0/logchecker)
 
 ### Configuration
 
