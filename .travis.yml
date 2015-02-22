@@ -6,3 +6,6 @@ go:
 branches:
   only:
     - master
+
+script:
+	- go build
