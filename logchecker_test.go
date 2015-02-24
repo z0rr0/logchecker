@@ -9,6 +9,8 @@ package logchecker
 import (
     "os"
     // "fmt"
+    "log"
+    "runtime"
     "testing"
     "strings"
     "io/ioutil"
@@ -23,12 +25,17 @@ func buildDir() string {
     return filepath.Join(os.Getenv("GOPATH"), "src/github.com/z0rr0/logchecker")
 }
 
-func createFile(name string, mode int) (*os.File, error) {
+func createFile(name string, mode int) error {
     file, err := os.Create(name)
     if err != nil {
-        return nil, err
+        return err
     }
-    return file, file.Chmod(os.FileMode(mode))
+    file.Close()
+    if runtime.GOOS == "windows" {
+        log.Printf("windows OS detected, skipped Chmod [%v]\n", name)
+        return nil
+    }
+    return os.Chmod(name, os.FileMode(mode))
 }
 
 func prepareConfig(from, to string, replace map[string]string) error {
@@ -39,6 +46,9 @@ func prepareConfig(from, to string, replace map[string]string) error {
     }
     strinfo := string(data)
     for k, v := range replace {
+        if runtime.GOOS == "windows" {
+            v = strings.Replace(v, "\\", "\\\\", -1)
+        }
         strinfo = strings.Replace(strinfo, k, v, 1)
     }
     return ioutil.WriteFile(to, []byte(strinfo), os.FileMode(0666))
@@ -141,6 +151,11 @@ func TestFilePath(t *testing.T) {
 }
 
 func TestInitConfig(t *testing.T) {
+    rm := func(name string) {
+        if err := os.Remove(name); err != nil {
+            t.Errorf("can't remove file [%v]: %v", name, err)
+        }
+    }
     testdir := buildDir()
     newvalues := map[string]string{
         "/var/log/nginx/error.log": filepath.Join(testdir, "error.log"),
@@ -152,12 +167,12 @@ func TestInitConfig(t *testing.T) {
     if err := prepareConfig(oldexample, example, newvalues); err != nil {
         t.Errorf("can't prepare test config file [%v]", err)
     }
-    defer os.Remove(example)
+    defer rm(example)
     for _, v := range newvalues {
-        if _, err := createFile(v, 0666); err != nil {
+        if err := createFile(v, 0666); err != nil {
             t.Errorf("test file preparation error [%v]", err)
         }
-        defer os.Remove(v)
+        defer rm(v)
     }
     logger := New()
     if err := InitConfig(logger, example); err != nil {
@@ -178,18 +193,19 @@ func TestInitConfig(t *testing.T) {
     }
 
     testfile := filepath.Join(testdir, "testfile.json")
-    f, err := createFile(testfile, 0200);
-    if err != nil {
+    if err := createFile(testfile, 0200); err != nil {
         t.Errorf("%v", err)
     }
-    defer os.Remove(testfile)
+    defer rm(testfile)
 
     if err := InitConfig(logger, testfile); err == nil {
         t.Errorf("need permissions error during InitConfig")
     }
-
-    f.Chmod(0600)
-    if err := InitConfig(logger, "/etc/passwd"); err == nil {
+    if runtime.GOOS == "windows" {
+        return
+    }
+    os.Chmod(testfile, 0600)
+    if err := InitConfig(logger, testfile); err == nil {
         t.Errorf("need json error during InitConfig")
     }
 }

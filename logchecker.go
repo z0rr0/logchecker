@@ -448,18 +448,18 @@ func InitConfig(logger *LogChecker, name string) error {
     }
     path, err := FilePath(name)
     if err != nil {
-        LoggerError.Println("Can't check config file")
+        LoggerError.Printf("Can't check config file [%v]", name)
         return err
     }
     logger.Cfg.Path = path
     jsondata, err := ioutil.ReadFile(path)
     if err != nil {
-        LoggerError.Println("Can't read config file")
+        LoggerError.Printf("Can't read config file [%v]", name)
         return err
     }
     err = json.Unmarshal(jsondata, &logger.Cfg)
     if err != nil {
-        LoggerError.Println("Can't parse config file")
+        LoggerError.Printf("Can't parse config file [%v]", name)
         return err
     }
     return logger.Validate()
