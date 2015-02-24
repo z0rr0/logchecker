@@ -69,9 +69,10 @@ type File struct {
     Increase bool         `json:"increase"`
     Emails []string       `json:"emails"`
     Limits [3]uint64      `json:"limits"`
-    Counters [3]uint64    // counter for every periond
+    States [3]uint64      // counter of sent emails
+    Counters [3]uint64    // cases counter for every periond
     RealLimits [3]uint64  // real conter after possible increasing
-    Periods [3]uint64     // hours after start
+    Hours uint64     // hours after start
     Pos uint64            // file posision after last check
     ModTime time.Time     // file modify date during last check
     LogStart time.Time    // time of logger start
@@ -300,7 +301,8 @@ func (logger *LogChecker) Start(finished chan bool) {
                 if err := f.Validate(); err != nil {
                     LoggerError.Printf("incorrect file was skipped [%v / %v]\n", serv.Name, f.Base())
                 } else {
-                    serv.Files[j].RealLimits, serv.Files[j].LogStart = serv.Files[j].Limits, time.Now()
+                    serv.Files[j].RealLimits = serv.Files[j].Limits
+                    serv.Files[j].LogStart = time.Now()
                     pending <- &Task{logger, &logger.Cfg.Observed[i], &serv.Files[j]}
                 }
             }
@@ -377,32 +379,29 @@ func checklimit(i int, c uint64, ) {
 
 // Check calculates currnet found abnormal records for time periods
 func (task *Task) Check(count uint64) error {
-    for i := range task.QFile.Counters {
-        task.QFile.Counters[i] += uint64(count)
-    }
-    news := [3]bool{false, false, false}
-    hours := uint64(time.Since(task.QFile.LogStart).Hours())
-    days := hours % 24
-    weeks := days % 7
-    switch {
-        case weeks != task.QFile.Periods[2]:
-            task.QFile.Periods[0] = hours
-            task.QFile.Periods[1] = days
-            task.QFile.Periods[2] = weeks
-            news = [3]bool{true, true, true}
+    // var needsend bool
+    // for i := range task.QFile.Counters {
+    //     task.QFile.Counters[i] += uint64(count)
+    // }
+    // hours := uint64(time.Since(task.QFile.LogStart).Hours())
+    // if task.QFile.Hours != hours {
+    //     days := hours % 24
+    //     weeks := days % 7
+    //     switch {
+    //         case (task.QFile.Hours % 168) != weeks:
+    //              task.QFile.Counters = [3]uint64{0,0,0}
+    //         case (task.QFile.Hours % 24) != days:
+    //             task.QFile.Counters[0:1] = [2]uint64{0, 0}
+    //         default:
+    //             task.QFile.Counters[0] = 0
+    //     }
+    // }
+    // for i := range task.QFile.Periods {
+    //     if (task.QFile.Counters[i] >= task.QFile.Boundary) && (task.QFile.States[i] <= task.QFile.RealLimits[i]) {
+    //         needsend = true
+    //     }
+    // }
 
-            task.QFile.Counters = [3]uint64{0,0,0}
-        case days != task.QFile.Periods[1]:
-            task.QFile.Periods[0] = hours
-            task.QFile.Periods[1] = days
-            task.QFile.Counters[0] = 0
-            task.QFile.Counters[1] = 0
-            news[0], news[1] = true, true
-        default:
-            task.QFile.Periods[0] = hours
-            task.QFile.Counters[0] = 0
-            news[0] = true
-    }
     // task.QFile.RealLimits
 
     return nil

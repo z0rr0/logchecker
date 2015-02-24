@@ -204,7 +204,7 @@ func TestInitConfig(t *testing.T) {
     if runtime.GOOS == "windows" {
         return
     }
-    os.Chmod(testfile, 0600)
+    os.Chmod(testfile, 0666)
     if err := InitConfig(logger, testfile); err == nil {
         t.Errorf("need json error during InitConfig")
     }
