@@ -57,7 +57,7 @@ var (
 
 // Backender is an interface to handle data storage operations.
 type Backender interface {
-    GetName() string
+    String() string
 }
 
 // File is a type of settings for a watched file.
@@ -72,7 +72,7 @@ type File struct {
     States [3]uint64      // counter of sent emails
     Counters [3]uint64    // cases counter for every periond
     RealLimits [3]uint64  // real conter after possible increasing
-    Hours uint64     // hours after start
+    Hours uint64          // hours after start
     Pos uint64            // file posision after last check
     ModTime time.Time     // file modify date during last check
     LogStart time.Time    // time of logger start
@@ -141,9 +141,9 @@ func (f *File) Validate() error {
     return err
 }
 
-// GetName of MemoryBackend returns a name of the logger back-end.
-func (bk *MemoryBackend) GetName() string {
-    return bk.Name
+// String of MemoryBackend returns a name of the logger back-end.
+func (bk *MemoryBackend) String() string {
+    return fmt.Sprintf("Backend: %v", bk.Name)
 }
 
 // String return a details about the configuration.
@@ -272,9 +272,13 @@ func (logger *LogChecker) Works() bool {
 // Stop finishes a logger observation. It changes a state of LogChecker object
 // after that it will not run new tasks and notify then incoming queue will be empty
 // a work can be finished with any problems.
-func (logger *LogChecker) Stop() {
+func (logger *LogChecker) Stop() bool {
+    if !logger.Works() {
+        return false
+    }
     logger.Completed = true
     LoggerDebug.Println("complete flag is set")
+    return true
 }
 
 // Start starts a logger observation.

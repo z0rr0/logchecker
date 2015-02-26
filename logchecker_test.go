@@ -125,8 +125,8 @@ func TestNew(t *testing.T) {
     if err := logger.Validate(); err != nil {
         t.Errorf("incorrect response: %v\n", err)
     }
-    if logger.Backend.GetName() != "Memory" {
-        t.Errorf("incorrect backend name: %v\n", logger.Backend.GetName())
+    if logger.Backend.String() != "Backend: Memory" {
+        t.Errorf("incorrect backend name: %v\n", logger.Backend.String())
     }
 }
 
