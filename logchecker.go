@@ -44,14 +44,11 @@ import (
     "github.com/z0rr0/taskqueue"
 )
 
-const (
-    // MaxPollers is maximum number of task handlers.
-    MaxPollers int = 5
-)
-
 var (
     // LoggerError implements error logger.
     LoggerError = log.New(os.Stderr, "ERROR [logchecker]: ", log.Ldate|log.Ltime|log.Lshortfile)
+    // LoggerInfo implements info logger.
+    LoggerInfo = log.New(os.Stderr, "INFO [logchecker]: ", log.Ldate|log.Ltime|log.Lshortfile)
     // LoggerDebug implements debug logger, it's disabled by default.
     LoggerDebug = log.New(ioutil.Discard, "DEBUG [logchecker]: ", log.Ldate|log.Lmicroseconds|log.Lshortfile)
 )
@@ -167,7 +164,7 @@ func New() *LogChecker {
 func (logger *LogChecker) String() string {
     data := fmt.Sprintf("%v [%v]", logger.Name, logger.Backend)
     if (logger.Running != time.Time{}) {
-        data += fmt.Sprintf(", starting from %v [%v]", logger.Running, time.Since(logger.Running))
+        data += fmt.Sprintf(" (%v [%v])", logger.Running, time.Since(logger.Running))
     }
     return data
 }
@@ -269,6 +266,7 @@ func (logger *LogChecker) Notify(msg string, to []string) error {
 
 // Start runs LogChecker processes.
 func (logger *LogChecker) Start() (chan bool, *sync.WaitGroup, chan taskqueue.Tasker) {
+    defer LoggerInfo.Printf("%v is started\n", logger)
     logger.Running = time.Now()
     var group sync.WaitGroup
     finish := make(chan bool)
@@ -292,6 +290,7 @@ func (logger *LogChecker) Start() (chan bool, *sync.WaitGroup, chan taskqueue.Ta
 func (logger *LogChecker) Stop(finish chan bool, group *sync.WaitGroup, complete chan taskqueue.Tasker) {
     defer func() {
         logger.Running = time.Time{}
+        LoggerInfo.Printf("%v is stopped\n", logger)
     }()
     taskqueue.Stop(finish, group, complete)
 }
