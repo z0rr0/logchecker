@@ -69,7 +69,8 @@ There is a [nice article](http://blog.golang.org/cover) about tests covering.
 
 ### Dependencies
 
-Standard [Go library](http://golang.org/pkg/).
+* standard [Go library](http://golang.org/pkg/)
+* [github.com/z0rr0/taskqueue](https://github.com/z0rr0/taskqueue) package
 
 ### Design guidelines
 

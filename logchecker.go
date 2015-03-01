@@ -41,6 +41,7 @@ import (
     "io/ioutil"
     "encoding/json"
     "path/filepath"
+    "github.com/z0rr0/taskqueue"
 )
 
 const (
@@ -50,9 +51,9 @@ const (
 
 var (
     // LoggerError implements error logger.
-    LoggerError = log.New(os.Stderr, "LogChecker ERROR: ", log.Ldate|log.Ltime|log.Lshortfile)
+    LoggerError = log.New(os.Stderr, "ERROR [logchecker]: ", log.Ldate|log.Ltime|log.Lshortfile)
     // LoggerDebug implements debug logger, it's disabled by default.
-    LoggerDebug = log.New(ioutil.Discard, "LogChecker DEBUG: ", log.Ldate|log.Lmicroseconds|log.Lshortfile)
+    LoggerDebug = log.New(ioutil.Discard, "DEBUG [logchecker]: ", log.Ldate|log.Lmicroseconds|log.Lshortfile)
 )
 
 // Backender is an interface to handle data storage operations.
@@ -98,16 +99,12 @@ type MemoryBackend struct {
     Active bool
 }
 
-// LogChecker is a main object for logging. It is completed
-// when stop commnad was called. It is finished when tasks were done
-// and the pending channel was closed. LogChecker is finished only
-// if it is completed.
+// LogChecker is a main object for logging.
 type LogChecker struct {
     Name string
     Cfg Config
     Backend Backender
-    Completed bool
-    Finished bool
+    Running time.Time
     InWork int
     mutex sync.RWMutex
 }
@@ -127,7 +124,6 @@ func (f *File) Check(count uint) (string, error) {
 
 // Base returns the last element of log file path.
 func (f *File) Base() string {
-    // get file name
     return filepath.Base(f.Log)
 }
 
@@ -164,8 +160,16 @@ func (cfg Config) String() string {
 func New() *LogChecker {
     res := &LogChecker{}
     res.Name = "LogChecker"
-    res.Completed, res.Finished = true, true
     return res
+}
+
+// String returns main info about LogChecker.
+func (logger *LogChecker) String() string {
+    data := fmt.Sprintf("%v [%v]", logger.Name, logger.Backend)
+    if (logger.Running != time.Time{}) {
+        data += fmt.Sprintf(", starting from %v [%v]", logger.Running, time.Since(logger.Running))
+    }
+    return data
 }
 
 // HasService checks that the Service is included to the LogChecker.
@@ -188,7 +192,7 @@ func (logger *LogChecker) HasService(serv *Service, lock bool) bool {
 
 // AddService includes a new Service to the LogChecker.
 func (logger *LogChecker) AddService(serv *Service) error {
-    if logger.Works() {
+    if (logger.Running != time.Time{}) {
         return fmt.Errorf("logchecker is already running")
     }
     logger.mutex.Lock()
@@ -263,58 +267,33 @@ func (logger *LogChecker) Notify(msg string, to []string) error {
     return smtp.SendMail(logger.Cfg.Sender["addr"], auth, logger.Cfg.Sender["user"], to, content)
 }
 
-// Works checks that LogChecker in already running.
-func (logger *LogChecker) Works() bool {
-    LoggerDebug.Println(logger.Completed, logger.Finished)
-    return (!logger.Completed) || (!logger.Finished)
+// Start runs LogChecker processes.
+func (logger *LogChecker) Start() (chan bool, *sync.WaitGroup, chan taskqueue.Tasker) {
+    logger.Running = time.Now()
+    var group sync.WaitGroup
+    finish := make(chan bool)
+
+    tasks := make([]taskqueue.Tasker, 0)
+    for i, serv := range logger.Cfg.Observed {
+        for j, f := range serv.Files {
+            if err := f.Validate(); err != nil {
+                LoggerError.Printf("incorrect file was skipped [%v / %v]\n", serv.Name, f.Base())
+            } else {
+                serv.Files[j].RealLimits = serv.Files[j].Limits
+                serv.Files[j].LogStart = time.Now()
+                tasks = append(tasks, &Task{logger, &logger.Cfg.Observed[i], &serv.Files[j]})
+           }
+       }
+    }
+    complete := taskqueue.Start(tasks, &group, finish)
+    return finish, &group, complete
 }
 
-// Stop finishes a logger observation. It changes a state of LogChecker object
-// after that it will not run new tasks and notify then incoming queue will be empty
-// a work can be finished with any problems.
-func (logger *LogChecker) Stop() bool {
-    if !logger.Works() {
-        return false
-    }
-    logger.Completed = true
-    LoggerDebug.Println("complete flag is set")
-    return true
-}
-
-// Start starts a logger observation.
-func (logger *LogChecker) Start(finished chan bool) {
-    if logger.Works() {
-        finished <- false
-        return
-    }
-    poolSize := MaxPollers
-    logger.Completed, logger.Finished = false, false
-    if len(logger.Cfg.Observed) < poolSize {
-        poolSize = len(logger.Cfg.Observed)
-    }
-    // create incoming and output channels
-    pending, complete := make(chan *Task), make(chan *Task)
-    // start tasks
-    for i := 0; i < poolSize; i++ {
-        go Poller(pending, complete, finished)
-    }
-    // put tasks to pending channel
-    go func() {
-        for i, serv := range logger.Cfg.Observed {
-            for j, f := range serv.Files {
-                if err := f.Validate(); err != nil {
-                    LoggerError.Printf("incorrect file was skipped [%v / %v]\n", serv.Name, f.Base())
-                } else {
-                    serv.Files[j].RealLimits = serv.Files[j].Limits
-                    serv.Files[j].LogStart = time.Now()
-                    pending <- &Task{logger, &logger.Cfg.Observed[i], &serv.Files[j]}
-                }
-            }
-        }
+func (logger *LogChecker) Stop(finish chan bool, group *sync.WaitGroup, complete chan taskqueue.Tasker) {
+    defer func() {
+        logger.Running = time.Time{}
     }()
-    for task := range complete {
-        go task.Sleep(pending)
-    }
+    taskqueue.Stop(finish, group, complete)
 }
 
 // String returns main text info about the task.
@@ -322,20 +301,20 @@ func (task *Task) String() string {
     return fmt.Sprintf("%v-%v-%v", task.QLogChecker.Name, task.QService.Name, task.QFile.Base())
 }
 
-// Sleep delays next task running.
-func (task *Task) Sleep(done chan *Task) {
-    if !task.QLogChecker.Completed {
-        task.log("sleep")
-        time.Sleep(time.Duration(task.QFile.Delay) * time.Second)
-        done <- task
+// Run starts a process to check a task.
+func (task *Task) Run() {
+    if count, err := task.Poll(); err != nil {
+        LoggerError.Printf("poll is incorrect [%v]", task)
     } else {
-        task.QLogChecker.mutex.Lock()
-        if !task.QLogChecker.Finished {
-            task.QLogChecker.Finished = true
-            close(done)
+        if err := task.Check(count); err != nil {
+            LoggerError.Printf("task is not checked [%v]: %v", task, err)
         }
-        task.QLogChecker.mutex.Unlock()
     }
+}
+
+// Sleep is a delay between runs of a task.
+func (task *Task) Sleep() {
+    time.Sleep(time.Duration(task.QFile.Delay) * time.Second)
 }
 
 // Poll reads file lines and counts needed from them.
@@ -377,10 +356,6 @@ func (task *Task) Poll() (uint64, error) {
     return counter, nil
 }
 
-func checklimit(i int, c uint64, ) {
-
-}
-
 // Check calculates currnet found abnormal records for time periods
 func (task *Task) Check(count uint64) error {
     // var needsend bool
@@ -411,18 +386,15 @@ func (task *Task) Check(count uint64) error {
     return nil
 }
 
-func (task *Task) log(msg string) {
-    LoggerDebug.Printf("%p: [%v %v %v] %v\n", task, task.QLogChecker.Name, task.QService.Name, task.QFile.Base(), msg)
-}
-
 // DebugMode is a initialization of Logger handlers.
 func DebugMode(debugmode bool) {
     debugHandle := ioutil.Discard
     if debugmode {
         debugHandle = os.Stdout
     }
-    LoggerDebug = log.New(debugHandle, "LogChecker DEBUG: ",
+    LoggerDebug = log.New(debugHandle, "DEBUG [logchecker]: ",
         log.Ldate|log.Lmicroseconds|log.Lshortfile)
+    taskqueue.Debug(debugmode)
 }
 
 // FilePath validates file name, converts its path from relative to absolute
@@ -446,7 +418,7 @@ func FilePath(name string) (string, error) {
 
 // InitConfig initializes configuration from a file.
 func InitConfig(logger *LogChecker, name string) error {
-    if logger.Works() {
+    if (logger.Running != time.Time{}) {
         return fmt.Errorf("logchecker is already running")
     }
     path, err := FilePath(name)
@@ -466,34 +438,4 @@ func InitConfig(logger *LogChecker, name string) error {
         return err
     }
     return logger.Validate()
-}
-
-// Poller handles incoming task and places it to output channel.
-func Poller(in chan *Task, out chan *Task, finished chan bool) {
-    var logger *LogChecker
-    for {
-        t, ok := <-in
-        if !ok {
-            break
-        }
-        if logger == nil {
-            logger = t.QLogChecker
-        }
-        logger.InWork++
-        t.log("=> poll enter")
-        if count, err := t.Poll(); err != nil {
-            LoggerError.Printf("poll is incorrect [%v]", t)
-        } else {
-            t.log(fmt.Sprintf("poll is completed (%v)", count))
-            if err := t.Check(count); err != nil {
-                LoggerError.Printf("task is not checked [%v]: %v", t, err)
-            }
-        }
-        t.log("<= poll exit")
-        logger.InWork--
-        out <- t
-    }
-    if (logger != nil) && (logger.InWork == 0) {
-        finished <- true
-    }
 }

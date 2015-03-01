@@ -60,7 +60,7 @@ func TestDebugMode(t *testing.T) {
         t.Errorf("incorrect references")
     }
     DebugMode(false)
-    if (LoggerError.Prefix() != "LogChecker ERROR: ") || (LoggerDebug.Prefix() != "LogChecker DEBUG: ") {
+    if (LoggerError.Prefix() != "ERROR [logchecker]: ") || (LoggerDebug.Prefix() != "DEBUG [logchecker]: ") {
         t.Errorf("incorrect loggers settings")
     }
     DebugMode(true)
