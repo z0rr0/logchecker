@@ -51,6 +51,7 @@ var (
     LoggerInfo = log.New(os.Stderr, "INFO [logchecker]: ", log.Ldate|log.Ltime|log.Lshortfile)
     // LoggerDebug implements debug logger, it's disabled by default.
     LoggerDebug = log.New(ioutil.Discard, "DEBUG [logchecker]: ", log.Ldate|log.Lmicroseconds|log.Lshortfile)
+    initTime = time.Time{}
 )
 
 // Backender is an interface to handle data storage operations.
@@ -70,7 +71,6 @@ type File struct {
     States [3]uint64      // counter of sent emails
     Counters [3]uint64    // cases counter for every periond
     RealLimits [3]uint64  // real conter after possible increasing
-    Hours uint64          // hours after start
     Pos uint64            // file posision after last check
     ModTime time.Time     // file modify date during last check
     LogStart time.Time    // time of logger start
@@ -163,7 +163,7 @@ func New() *LogChecker {
 // String returns main info about LogChecker.
 func (logger *LogChecker) String() string {
     data := fmt.Sprintf("%v [%v]", logger.Name, logger.Backend)
-    if (logger.Running != time.Time{}) {
+    if logger.IsWorking() {
         data += fmt.Sprintf(" (%v [%v])", logger.Running, time.Since(logger.Running))
     }
     return data
@@ -189,7 +189,7 @@ func (logger *LogChecker) HasService(serv *Service, lock bool) bool {
 
 // AddService includes a new Service to the LogChecker.
 func (logger *LogChecker) AddService(serv *Service) error {
-    if (logger.Running != time.Time{}) {
+    if logger.IsWorking() {
         return fmt.Errorf("logchecker is already running")
     }
     logger.mutex.Lock()
@@ -264,12 +264,24 @@ func (logger *LogChecker) Notify(msg string, to []string) error {
     return smtp.SendMail(logger.Cfg.Sender["addr"], auth, logger.Cfg.Sender["user"], to, content)
 }
 
+// IsWorking return "true" if LogChecker process is already running.
+func (logger *LogChecker) IsWorking() bool {
+    return logger.Running != initTime
+}
+
 // Start runs LogChecker processes.
-func (logger *LogChecker) Start() (chan bool, *sync.WaitGroup, chan taskqueue.Tasker) {
+func (logger *LogChecker) Start() (chan bool, *sync.WaitGroup, chan taskqueue.Tasker, error) {
+    var (
+        finish chan bool
+        group sync.WaitGroup
+        complete chan taskqueue.Tasker
+    )
+    if logger.IsWorking() {
+        return finish, &group, complete, fmt.Errorf("process is already running")
+    }
     defer LoggerInfo.Printf("%v is started\n", logger)
     logger.Running = time.Now()
-    var group sync.WaitGroup
-    finish := make(chan bool)
+    finish = make(chan bool)
 
     tasks := make([]taskqueue.Tasker, 0)
     for i, serv := range logger.Cfg.Observed {
@@ -283,13 +295,13 @@ func (logger *LogChecker) Start() (chan bool, *sync.WaitGroup, chan taskqueue.Ta
            }
        }
     }
-    complete := taskqueue.Start(tasks, &group, finish)
-    return finish, &group, complete
+    complete = taskqueue.Start(tasks, &group, finish)
+    return finish, &group, complete, nil
 }
 
 func (logger *LogChecker) Stop(finish chan bool, group *sync.WaitGroup, complete chan taskqueue.Tasker) {
     defer func() {
-        logger.Running = time.Time{}
+        logger.Running = initTime
         LoggerInfo.Printf("%v is stopped\n", logger)
     }()
     taskqueue.Stop(finish, group, complete)
@@ -338,6 +350,7 @@ func (task *Task) Poll() (uint64, error) {
     scanner := bufio.NewScanner(file)
     for scanner.Scan() {
         clines++
+        // TODO: fix for file rotation
         if task.QFile.Pos < clines {
             if line := scanner.Text(); line != "" {
                 if len(task.QFile.Pattern) > 0 {
@@ -417,7 +430,7 @@ func FilePath(name string) (string, error) {
 
 // InitConfig initializes configuration from a file.
 func InitConfig(logger *LogChecker, name string) error {
-    if (logger.Running != time.Time{}) {
+    if logger.IsWorking() {
         return fmt.Errorf("logchecker is already running")
     }
     path, err := FilePath(name)
