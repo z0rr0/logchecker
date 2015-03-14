@@ -8,7 +8,7 @@ branches:
     - master
 
 install:
-    - go get github.com/z0rr0/taskqueue
+    - go get golang.org/x/exp/inotify
 
 script:
     - go test -v ./...

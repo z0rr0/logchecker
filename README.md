@@ -10,6 +10,8 @@ It is a simple library to check a list of logs files and send notification about
 
 ### Usage
 
+Only Linux is supported now.
+
 API descriptions can be found on [godoc.org](http://godoc.org/github.com/z0rr0/logchecker).
 
 ```go
@@ -70,7 +72,7 @@ There is a [nice article](http://blog.golang.org/cover) about tests covering.
 ### Dependencies
 
 * standard [Go library](http://golang.org/pkg/)
-* [github.com/z0rr0/taskqueue](https://github.com/z0rr0/taskqueue) package
+* [inotify](https://godoc.org/golang.org/x/exp/inotify) package
 
 ### Design guidelines
 

@@ -35,13 +35,14 @@ import (
     "fmt"
     "sync"
     "time"
-    "bufio"
+    // "bufio"
     "strings"
+    "runtime"
     "net/smtp"
     "io/ioutil"
     "encoding/json"
     "path/filepath"
-    "github.com/z0rr0/taskqueue"
+    "golang.org/x/exp/inotify"
 )
 
 var (
@@ -62,7 +63,6 @@ type Backender interface {
 // File is a type of settings for a watched file.
 type File struct {
     Log string            `json:"file"`
-    Delay uint            `json:"delay"`
     Pattern string        `json:"pattern"`
     Boundary uint         `json:"boundary"`
     Increase bool         `json:"increase"`
@@ -107,17 +107,11 @@ type LogChecker struct {
 }
 
 // Task is an object of logging task.
-type Task struct {
-    QLogChecker *LogChecker
-    QService *Service
-    QFile *File
-}
-
-// Check validates conditions before sending email notifications.
-func (f *File) Check(count uint) (string, error) {
-    // period := time.Since(f.Begin)
-    return "", nil
-}
+// type Task struct {
+//     QLogChecker *LogChecker
+//     QService *Service
+//     QFile *File
+// }
 
 // Base returns the last element of log file path.
 func (f *File) Base() string {
@@ -134,6 +128,39 @@ func (f *File) Validate() error {
     return err
 }
 
+// Watch implements a file watcher.
+func (f *File) Watch(group *sync.WaitGroup, finish chan bool, logger *LogChecker) {
+    watcher, err := inotify.NewWatcher()
+    if err != nil {
+        LoggerError.Printf("can't create new watcher: %v - %v\n", f.Base(), err)
+        return
+    }
+    if err = watcher.AddWatch(f.Log, inotify.IN_CLOSE_WRITE); err != nil {
+        LoggerError.Printf("can't add new watcher: %v - %v\n", f.Base(), err)
+        return
+    }
+    for {
+        select {
+            case <-finish:
+                return
+            case <-watcher.Event:
+                f.Check(group, logger)
+            case err := <-watcher.Error:
+                LoggerError.Printf("file watcher error: %v\n", err)
+                return
+        }
+    }
+}
+
+// Check validates conditions before sending email notifications.
+func (f *File) Check(group *sync.WaitGroup, logger *LogChecker) {
+    group.Add(1)
+    defer group.Done()
+    LoggerDebug.Printf("call test file checker: %v\n", f.Base())
+    time.Sleep(30 * time.Second)
+    LoggerDebug.Printf("done test file checker: %v\n", f.Base())
+}
+
 // String of MemoryBackend returns a name of the logger back-end.
 func (bk *MemoryBackend) String() string {
     return fmt.Sprintf("Backend: %v", bk.Name)
@@ -146,7 +173,7 @@ func (cfg Config) String() string {
         // services[i] = fmt.Sprintf("%v", service.Name)
         files := make([]string, len(service.Files))
         for j, file := range service.Files {
-            files[j] = fmt.Sprintf("File: %v; Delay: %v; Pattern: %v; Boundary: %v; Increase: %v; Emails: %v; Limits: %v", file.Log, file.Delay, file.Pattern, file.Boundary, file.Increase, file.Emails, file.Limits)
+            files[j] = fmt.Sprintf("File: %v; Pattern: %v; Boundary: %v; Increase: %v; Emails: %v; Limits: %v", file.Log, file.Pattern, file.Boundary, file.Increase, file.Emails, file.Limits)
         }
         services[i] = fmt.Sprintf("%v\n\t%v", service.Name, strings.Join(files, "\n\t"))
     }
@@ -270,133 +297,132 @@ func (logger *LogChecker) IsWorking() bool {
 }
 
 // Start runs LogChecker processes.
-func (logger *LogChecker) Start() (chan bool, *sync.WaitGroup, chan taskqueue.Tasker, error) {
-    var (
-        finish chan bool
-        group sync.WaitGroup
-        complete chan taskqueue.Tasker
-    )
+func (logger *LogChecker) Start(group *sync.WaitGroup) (chan bool, error) {
+    finish := make(chan bool)
     if logger.IsWorking() {
-        return finish, &group, complete, fmt.Errorf("process is already running")
+        return finish, fmt.Errorf("process is already running")
     }
-    defer LoggerInfo.Printf("%v is started\n", logger)
     logger.Running = time.Now()
-    finish = make(chan bool)
+    defer LoggerInfo.Printf("%v is started\n", logger)
 
-    tasks := make([]taskqueue.Tasker, 0)
-    for i, serv := range logger.Cfg.Observed {
+    for _, serv := range logger.Cfg.Observed {
         for j, f := range serv.Files {
             if err := f.Validate(); err != nil {
                 LoggerError.Printf("incorrect file was skipped [%v / %v]\n", serv.Name, f.Base())
             } else {
                 serv.Files[j].RealLimits = serv.Files[j].Limits
                 serv.Files[j].LogStart = time.Now()
-                tasks = append(tasks, &Task{logger, &logger.Cfg.Observed[i], &serv.Files[j]})
+                go serv.Files[j].Watch(group, finish, logger)
            }
        }
     }
-    complete = taskqueue.Start(tasks, &group, finish)
-    return finish, &group, complete, nil
+    return finish, nil
 }
 
-func (logger *LogChecker) Stop(finish chan bool, group *sync.WaitGroup, complete chan taskqueue.Tasker) {
-    defer func() {
-        logger.Running = initTime
-        LoggerInfo.Printf("%v is stopped\n", logger)
-    }()
-    taskqueue.Stop(finish, group, complete)
+func (logger *LogChecker) Stop(finish chan bool, group *sync.WaitGroup) error {
+    if !logger.IsWorking() {
+        return fmt.Errorf("LogChecker is already stopped")
+    }
+    close(finish)
+    group.Wait()
+    logger.Running = initTime
+    LoggerInfo.Printf("%v is stopped\n", logger)
+    return nil
 }
+
+// func (logger *LogChecker) Stop(finish chan bool, group *sync.WaitGroup, complete chan taskqueue.Tasker) {
+//     defer func() {
+//         logger.Running = initTime
+//         LoggerInfo.Printf("%v is stopped\n", logger)
+//     }()
+//     taskqueue.Stop(finish, group, complete)
+// }
 
 // String returns main text info about the task.
-func (task *Task) String() string {
-    return fmt.Sprintf("%v-%v-%v", task.QLogChecker.Name, task.QService.Name, task.QFile.Base())
-}
+// func (task *Task) String() string {
+//     return fmt.Sprintf("%v-%v-%v", task.QLogChecker.Name, task.QService.Name, task.QFile.Base())
+// }
 
-// Run starts a process to check a task.
-func (task *Task) Run() {
-    if count, err := task.Poll(); err != nil {
-        LoggerError.Printf("poll is incorrect [%v]", task)
-    } else {
-        if err := task.Check(count); err != nil {
-            LoggerError.Printf("task is not checked [%v]: %v", task, err)
-        }
-    }
-}
-
-// Sleep is a delay between runs of a task.
-func (task *Task) Sleep() {
-    time.Sleep(time.Duration(task.QFile.Delay) * time.Second)
-}
+// // Run starts a process to check a task.
+// func (task *Task) Run() {
+//     if count, err := task.Poll(); err != nil {
+//         LoggerError.Printf("poll is incorrect [%v]", task)
+//     } else {
+//         if err := task.Check(count); err != nil {
+//             LoggerError.Printf("task is not checked [%v]: %v", task, err)
+//         }
+//     }
+// }
 
 // Poll reads file lines and counts needed from them.
 // It skips "pos" lines.
-func (task *Task) Poll() (uint64, error) {
-    var counter, clines uint64
-    info, err := os.Stat(task.QFile.Log)
-    if err != nil {
-        return counter, err
-    }
-    if task.QFile.ModTime.Equal(info.ModTime()) {
-        // file is not chnaged
-        return counter, nil
-    }
-    file, err := os.Open(task.QFile.Log)
-    if err != nil {
-        LoggerError.Printf("can't open file: %v\n", task.QFile.Log)
-        return counter, err
-    }
-    defer file.Close()
-    // read file line by line
-    scanner := bufio.NewScanner(file)
-    for scanner.Scan() {
-        clines++
-        // TODO: fix for file rotation
-        if task.QFile.Pos < clines {
-            if line := scanner.Text(); line != "" {
-                if len(task.QFile.Pattern) > 0 {
-                    if strings.Contains(line, task.QFile.Pattern) {
-                        counter++
-                    }
-                } else {
-                    counter++
-                }
-            }
-        }
-    }
-    task.QFile.Pos = clines
-    task.QFile.ModTime = info.ModTime()
-    return counter, nil
-}
+// func (task *Task) Poll() (uint64, error) {
+//     var counter, clines uint64
+//     info, err := os.Stat(task.QFile.Log)
+//     if err != nil {
+//         return counter, err
+//     }
+//     if task.QFile.ModTime.Equal(info.ModTime()) {
+//         // file is not chnaged
+//         return counter, nil
+//     }
+//     file, err := os.Open(task.QFile.Log)
+//     if err != nil {
+//         LoggerError.Printf("can't open file: %v\n", task.QFile.Log)
+//         return counter, err
+//     }
+//     defer file.Close()
+//     // read file line by line
+//     scanner := bufio.NewScanner(file)
+//     for scanner.Scan() {
+//         clines++
+//         // TODO: fix for file rotation
+//         if task.QFile.Pos < clines {
+//             if line := scanner.Text(); line != "" {
+//                 if len(task.QFile.Pattern) > 0 {
+//                     if strings.Contains(line, task.QFile.Pattern) {
+//                         counter++
+//                     }
+//                 } else {
+//                     counter++
+//                 }
+//             }
+//         }
+//     }
+//     task.QFile.Pos = clines
+//     task.QFile.ModTime = info.ModTime()
+//     return counter, nil
+// }
 
-// Check calculates currnet found abnormal records for time periods
-func (task *Task) Check(count uint64) error {
-    // var needsend bool
-    // for i := range task.QFile.Counters {
-    //     task.QFile.Counters[i] += uint64(count)
-    // }
-    // hours := uint64(time.Since(task.QFile.LogStart).Hours())
-    // if task.QFile.Hours != hours {
-    //     days := hours % 24
-    //     weeks := days % 7
-    //     switch {
-    //         case (task.QFile.Hours % 168) != weeks:
-    //              task.QFile.Counters = [3]uint64{0,0,0}
-    //         case (task.QFile.Hours % 24) != days:
-    //             task.QFile.Counters[0:1] = [2]uint64{0, 0}
-    //         default:
-    //             task.QFile.Counters[0] = 0
-    //     }
-    // }
-    // for i := range task.QFile.Periods {
-    //     if (task.QFile.Counters[i] >= task.QFile.Boundary) && (task.QFile.States[i] <= task.QFile.RealLimits[i]) {
-    //         needsend = true
-    //     }
-    // }
+// // Check calculates currnet found abnormal records for time periods
+// func (task *Task) Check(count uint64) error {
+//     // var needsend bool
+//     // for i := range task.QFile.Counters {
+//     //     task.QFile.Counters[i] += uint64(count)
+//     // }
+//     // hours := uint64(time.Since(task.QFile.LogStart).Hours())
+//     // if task.QFile.Hours != hours {
+//     //     days := hours % 24
+//     //     weeks := days % 7
+//     //     switch {
+//     //         case (task.QFile.Hours % 168) != weeks:
+//     //              task.QFile.Counters = [3]uint64{0,0,0}
+//     //         case (task.QFile.Hours % 24) != days:
+//     //             task.QFile.Counters[0:1] = [2]uint64{0, 0}
+//     //         default:
+//     //             task.QFile.Counters[0] = 0
+//     //     }
+//     // }
+//     // for i := range task.QFile.Periods {
+//     //     if (task.QFile.Counters[i] >= task.QFile.Boundary) && (task.QFile.States[i] <= task.QFile.RealLimits[i]) {
+//     //         needsend = true
+//     //     }
+//     // }
 
-    // task.QFile.RealLimits
+//     // task.QFile.RealLimits
 
-    return nil
-}
+//     return nil
+// }
 
 // DebugMode is a initialization of Logger handlers.
 func DebugMode(debugmode bool) {
@@ -406,7 +432,6 @@ func DebugMode(debugmode bool) {
     }
     LoggerDebug = log.New(debugHandle, "DEBUG [logchecker]: ",
         log.Ldate|log.Lmicroseconds|log.Lshortfile)
-    taskqueue.Debug(debugmode)
 }
 
 // FilePath validates file name, converts its path from relative to absolute
@@ -430,23 +455,27 @@ func FilePath(name string) (string, error) {
 
 // InitConfig initializes configuration from a file.
 func InitConfig(logger *LogChecker, name string) error {
+    if runtime.GOOS != "linux" {
+        LoggerError.Printf("unsupported platform: %v\n", runtime.GOOS)
+        return fmt.Errorf("only Linux is now supported")
+    }
     if logger.IsWorking() {
         return fmt.Errorf("logchecker is already running")
     }
     path, err := FilePath(name)
     if err != nil {
-        LoggerError.Printf("Can't check config file [%v]", name)
+        LoggerError.Printf("can't check config file [%v]", name)
         return err
     }
     logger.Cfg.Path = path
     jsondata, err := ioutil.ReadFile(path)
     if err != nil {
-        LoggerError.Printf("Can't read config file [%v]", name)
+        LoggerError.Printf("can't read config file [%v]", name)
         return err
     }
     err = json.Unmarshal(jsondata, &logger.Cfg)
     if err != nil {
-        LoggerError.Printf("Can't parse config file [%v]", name)
+        LoggerError.Printf("can't parse config file [%v]", name)
         return err
     }
     return logger.Validate()
