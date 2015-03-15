@@ -45,6 +45,11 @@ import (
     "golang.org/x/exp/inotify"
 )
 
+const (
+    moveWait = 2 * time.Second
+    watcherMask uint32 = inotify.IN_CLOSE_WRITE | inotify.IN_DELETE_SELF
+)
+
 var (
     // LoggerError implements error logger.
     LoggerError = log.New(os.Stderr, "ERROR [logchecker]: ", log.Ldate|log.Ltime|log.Lshortfile)
@@ -135,7 +140,7 @@ func (f *File) Watch(group *sync.WaitGroup, finish chan bool, logger *LogChecker
         LoggerError.Printf("can't create new watcher: %v - %v\n", f.Base(), err)
         return
     }
-    if err = watcher.AddWatch(f.Log, inotify.IN_CLOSE_WRITE); err != nil {
+    if err = watcher.AddWatch(f.Log, watcherMask); err != nil {
         LoggerError.Printf("can't add new watcher: %v - %v\n", f.Base(), err)
         return
     }
@@ -143,13 +148,37 @@ func (f *File) Watch(group *sync.WaitGroup, finish chan bool, logger *LogChecker
         select {
             case <-finish:
                 return
-            case <-watcher.Event:
+            case event := <-watcher.Event:
+                if (event.Mask & inotify.IN_DELETE_SELF) != 0 {
+                    LoggerInfo.Printf("file was deleted or moved: %v\n", f.Base())
+                    watcher, err = f.IsMoved(watcher)
+                    if err != nil {
+                        LoggerError.Printf("re-creation watcher error: %v\n", err)
+                        return
+                    }
+                }
                 f.Check(group, logger)
             case err := <-watcher.Error:
                 LoggerError.Printf("file watcher error: %v\n", err)
                 return
         }
     }
+}
+
+// IsMoved creates new inotify watcher if a file was moved, instead returns an error.
+func (f *File) IsMoved(oldw *inotify.Watcher) (*inotify.Watcher, error) {
+    var neww *inotify.Watcher
+    time.Sleep(moveWait)
+    if _, err := os.Stat(f.Log); err != nil {
+        oldw.RemoveWatch(f.Log)
+        return neww, err
+    }
+    neww, err := inotify.NewWatcher()
+    if err != nil {
+        return neww, err
+    }
+    err = neww.AddWatch(f.Log, watcherMask)
+    return neww, err
 }
 
 // Check validates conditions before sending email notifications.
