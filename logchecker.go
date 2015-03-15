@@ -348,9 +348,10 @@ func (logger *LogChecker) Start(group *sync.WaitGroup) (chan bool, error) {
     return finish, nil
 }
 
+// Stop terminated running process.
 func (logger *LogChecker) Stop(finish chan bool, group *sync.WaitGroup) error {
     if !logger.IsWorking() {
-        return fmt.Errorf("LogChecker is already stopped")
+        return fmt.Errorf("process is already stopped")
     }
     close(finish)
     group.Wait()
