@@ -420,24 +420,23 @@ func (f *File) Check(group *sync.WaitGroup, logger *LogChecker) error {
         f.Period = curHours
         f.Found = 0
         f.Counter = 0
+        LoggerDebug.Printf("period was reset [%v]", f.Base())
     }
     f.Pos = clines
     f.Found += counter
 
-    needSend := false
     if (f.Found >= f.ExtBoundary) && (f.Counter <= f.Limit) {
-        needSend = true
         if f.Increase {
             f.ExtBoundary = f.ExtBoundary * 2
         }
-    } else {
-        f.ExtBoundary = f.Boundary
-    }
+        LoggerDebug.Printf("check accepted [%v], found=%v, boundary=%v", f.Base(), f.Found, f.ExtBoundary)
 
-    // send email
-    if needSend {
         go logger.Notify("message", f.Emails)
         f.Counter++
+
+        LoggerDebug.Printf("email prepare sent [%v], counter=%v, limit=%v", f.Base(), f.Counter, f.Limit)
+    } else {
+        f.ExtBoundary = f.Boundary
     }
     return nil
 }
