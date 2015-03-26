@@ -30,24 +30,26 @@
 package logchecker
 
 import (
-    "os"
-    "log"
+    "bufio"
+    "encoding/json"
     "fmt"
+    "golang.org/x/exp/inotify"
+    "io/ioutil"
+    "log"
+    "net/smtp"
+    "os"
+    "path/filepath"
+    "regexp"
+    "runtime"
+    "strings"
     "sync"
     "time"
-    // "bufio"
-    "strings"
-    "runtime"
-    "net/smtp"
-    "io/ioutil"
-    "encoding/json"
-    "path/filepath"
-    "golang.org/x/exp/inotify"
 )
 
 const (
-    moveWait = 2 * time.Second
+    moveWait = 5 * time.Second
     watcherMask uint32 = inotify.IN_CLOSE_WRITE | inotify.IN_DELETE_SELF
+    maxMsgLines uint64 = 10
 )
 
 var (
@@ -58,6 +60,7 @@ var (
     // LoggerDebug implements debug logger, it's disabled by default.
     LoggerDebug = log.New(ioutil.Discard, "DEBUG [logchecker]: ", log.Ldate|log.Lmicroseconds|log.Lshortfile)
     initTime = time.Time{}
+    debug bool = false
 )
 
 // Backender is an interface to handle data storage operations.
@@ -67,18 +70,21 @@ type Backender interface {
 
 // File is a type of settings for a watched file.
 type File struct {
-    Log string            `json:"file"`
-    Pattern string        `json:"pattern"`
-    Boundary uint         `json:"boundary"`
-    Increase bool         `json:"increase"`
-    Emails []string       `json:"emails"`
-    Limits [3]uint64      `json:"limits"`
-    States [3]uint64      // counter of sent emails
-    Counters [3]uint64    // cases counter for every periond
-    RealLimits [3]uint64  // real conter after possible increasing
-    Pos uint64            // file posision after last check
-    ModTime time.Time     // file modify date during last check
-    LogStart time.Time    // time of logger start
+    Log string                `json:"file"`
+    Pattern string            `json:"pattern"`
+    Boundary uint64           `json:"boundary"`
+    Increase bool             `json:"increase"`
+    Emails []string           `json:"emails"`
+    Limit uint64              `json:"limit"`
+    RgPattern *regexp.Regexp  // regexp expression from the pattern
+    Pos uint64                // file posision after last check
+    LogStart time.Time        // time of logger start
+    Period uint64             // number of a hour after last check
+    Found uint64              // found by the Pattern
+    Counter uint64            // cases counter for time period
+    ExtBoundary uint64        // extended boundary value if Increase is set
+
+    States [3]uint64          // counter of sent emails
 }
 
 // Service is a type of settings for a watched service.
@@ -118,9 +124,19 @@ type LogChecker struct {
 //     QFile *File
 // }
 
+// String returns absolute file's path.
+func (s Service) String() string {
+    return s.Name
+}
+
 // Base returns the last element of log file path.
 func (f *File) Base() string {
     return filepath.Base(f.Log)
+}
+
+// String returns absolute file's path.
+func (f *File) String() string {
+    return f.Log
 }
 
 // Validate checks that File is correct: has absolute path and exists.
@@ -130,7 +146,17 @@ func (f *File) Validate() error {
         return fmt.Errorf("path should be absolute")
     }
     _, err = os.Stat(f.Log);
-    return err
+    if err != nil {
+        return err
+    }
+    if len(f.Pattern) == 0 {
+        return fmt.Errorf("pattern should not be empty")
+    }
+    f.RgPattern, err = regexp.Compile(f.Pattern)
+    if err != nil {
+        return err
+    }
+    return nil
 }
 
 // Watch implements a file watcher.
@@ -151,43 +177,21 @@ func (f *File) Watch(group *sync.WaitGroup, finish chan bool, logger *LogChecker
             case event := <-watcher.Event:
                 if (event.Mask & inotify.IN_DELETE_SELF) != 0 {
                     LoggerInfo.Printf("file was deleted or moved: %v\n", f.Base())
-                    watcher, err = f.IsMoved(watcher)
+                    watcher, err = IsMoved(f.Log, watcher)
                     if err != nil {
                         LoggerError.Printf("re-creation watcher error: %v\n", err)
                         return
                     }
+                    f.Pos = 0
                 }
-                f.Check(group, logger)
+                if err := f.Check(group, logger); err != nil {
+                    LoggerError.Printf("[%v]: %v", f.String(), err)
+                }
             case err := <-watcher.Error:
                 LoggerError.Printf("file watcher error: %v\n", err)
                 return
         }
     }
-}
-
-// IsMoved creates new inotify watcher if a file was moved, instead returns an error.
-func (f *File) IsMoved(oldw *inotify.Watcher) (*inotify.Watcher, error) {
-    var neww *inotify.Watcher
-    time.Sleep(moveWait)
-    if _, err := os.Stat(f.Log); err != nil {
-        oldw.RemoveWatch(f.Log)
-        return neww, err
-    }
-    neww, err := inotify.NewWatcher()
-    if err != nil {
-        return neww, err
-    }
-    err = neww.AddWatch(f.Log, watcherMask)
-    return neww, err
-}
-
-// Check validates conditions before sending email notifications.
-func (f *File) Check(group *sync.WaitGroup, logger *LogChecker) {
-    group.Add(1)
-    defer group.Done()
-    LoggerDebug.Printf("call test file checker: %v\n", f.Base())
-    time.Sleep(30 * time.Second)
-    LoggerDebug.Printf("done test file checker: %v\n", f.Base())
 }
 
 // String of MemoryBackend returns a name of the logger back-end.
@@ -196,18 +200,18 @@ func (bk *MemoryBackend) String() string {
 }
 
 // String return a details about the configuration.
-func (cfg Config) String() string {
-    services := make([]string, len(cfg.Observed))
-    for i, service := range cfg.Observed {
-        // services[i] = fmt.Sprintf("%v", service.Name)
-        files := make([]string, len(service.Files))
-        for j, file := range service.Files {
-            files[j] = fmt.Sprintf("File: %v; Pattern: %v; Boundary: %v; Increase: %v; Emails: %v; Limits: %v", file.Log, file.Pattern, file.Boundary, file.Increase, file.Emails, file.Limits)
-        }
-        services[i] = fmt.Sprintf("%v\n\t%v", service.Name, strings.Join(files, "\n\t"))
-    }
-    return fmt.Sprintf("Config: %v\n sender: %v backend: %v\n---\n%v", cfg.Path, cfg.Sender, cfg.Storage, strings.Join(services, "\n---\n"))
-}
+// func (cfg Config) String() string {
+//     services := make([]string, len(cfg.Observed))
+//     for i, service := range cfg.Observed {
+//         // services[i] = fmt.Sprintf("%v", service.Name)
+//         files := make([]string, len(service.Files))
+//         for j, file := range service.Files {
+//             files[j] = fmt.Sprintf("File: %v; Pattern: %v; Boundary: %v; Increase: %v; Emails: %v; Limits: %v", file.Log, file.Pattern, file.Boundary, file.Increase, file.Emails, file.Limits)
+//         }
+//         services[i] = fmt.Sprintf("%v\n\t%v", service.Name, strings.Join(files, "\n\t"))
+//     }
+//     return fmt.Sprintf("Config: %v\n sender: %v backend: %v\n---\n%v", cfg.Path, cfg.Sender, cfg.Storage, strings.Join(services, "\n---\n"))
+// }
 
 // New created new LogChecker object and returns its reference.
 func New() *LogChecker {
@@ -279,7 +283,7 @@ func (logger *LogChecker) Validate() error {
         services[serv.Name] = true
         for _, f := range serv.Files {
             if err := f.Validate(); err != nil {
-                return fmt.Errorf("file is incorrect [%v] %v", f.Log, err)
+                return fmt.Errorf("file error [%v] %v", f.Log, err)
             }
         }
     }
@@ -308,7 +312,7 @@ func (logger *LogChecker) Validate() error {
 }
 
 // Notify sends a prepared email message.
-func (logger *LogChecker) Notify(msg string, to []string) error {
+func (logger *LogChecker) Notify(msg string, to []string) {
     const mime string = "MIME-version: 1.0;\nContent-Type: text/plain; charset=\"UTF-8\";\n\n";
     content := []byte("Subject: LogChecker notification\n" + mime + msg)
     auth := smtp.PlainAuth(
@@ -317,7 +321,11 @@ func (logger *LogChecker) Notify(msg string, to []string) error {
         logger.Cfg.Sender["password"],
         logger.Cfg.Sender["host"],
     )
-    return smtp.SendMail(logger.Cfg.Sender["addr"], auth, logger.Cfg.Sender["user"], to, content)
+    LoggerDebug.Println("send email")
+    err := smtp.SendMail(logger.Cfg.Sender["addr"], auth, logger.Cfg.Sender["user"], to, content)
+    if err != nil {
+        LoggerError.Printf("send email error: %v", err)
+    }
 }
 
 // IsWorking return "true" if LogChecker process is already running.
@@ -327,23 +335,32 @@ func (logger *LogChecker) IsWorking() bool {
 
 // Start runs LogChecker processes.
 func (logger *LogChecker) Start(group *sync.WaitGroup) (chan bool, error) {
+    var watched int
     finish := make(chan bool)
     if logger.IsWorking() {
         return finish, fmt.Errorf("process is already running")
     }
     logger.Running = time.Now()
-    defer LoggerInfo.Printf("%v is started\n", logger)
+    defer LoggerInfo.Printf("%v is started.\n", logger)
 
     for _, serv := range logger.Cfg.Observed {
-        for j, f := range serv.Files {
-            if err := f.Validate(); err != nil {
-                LoggerError.Printf("incorrect file was skipped [%v / %v]\n", serv.Name, f.Base())
+        info := make([]string, len(serv.Files))
+        for j := range serv.Files {
+            if err := serv.Files[j].Validate(); err != nil {
+                LoggerError.Printf("incorrect file was skipped [%v / %v]\n", serv.Name, serv.Files[j].Base())
+                info[j] = fmt.Sprintf("FAILED: %s", serv.Files[j].String())
             } else {
-                serv.Files[j].RealLimits = serv.Files[j].Limits
                 serv.Files[j].LogStart = time.Now()
+                serv.Files[j].ExtBoundary = serv.Files[j].Boundary
                 go serv.Files[j].Watch(group, finish, logger)
+                info[j] = fmt.Sprintf("OK: %s", serv.Files[j].String())
+                watched++
            }
        }
+       LoggerInfo.Printf("%v prepared\n\t%v\n", serv, strings.Join(info, "\n\t"))
+    }
+    if watched == 0 {
+        return finish, fmt.Errorf("empty task queue")
     }
     return finish, nil
 }
@@ -360,102 +377,74 @@ func (logger *LogChecker) Stop(finish chan bool, group *sync.WaitGroup) error {
     return nil
 }
 
-// func (logger *LogChecker) Stop(finish chan bool, group *sync.WaitGroup, complete chan taskqueue.Tasker) {
-//     defer func() {
-//         logger.Running = initTime
-//         LoggerInfo.Printf("%v is stopped\n", logger)
-//     }()
-//     taskqueue.Stop(finish, group, complete)
-// }
+// Check validates conditions before sending email notifications.
+func (f *File) Check(group *sync.WaitGroup, logger *LogChecker) error {
+    var (
+        counter, clines uint64
+        msgLines []string
+    )
+    group.Add(1)
+    LoggerDebug.Printf("check: %v\n", f.Base())
+    defer func() {
+        LoggerDebug.Printf("check done: %v\n", f.Base())
+        group.Done()
+    }()
 
-// String returns main text info about the task.
-// func (task *Task) String() string {
-//     return fmt.Sprintf("%v-%v-%v", task.QLogChecker.Name, task.QService.Name, task.QFile.Base())
-// }
+    file, err := os.Open(f.Log)
+    if err != nil {
+        return err
+    }
+    defer file.Close()
 
-// // Run starts a process to check a task.
-// func (task *Task) Run() {
-//     if count, err := task.Poll(); err != nil {
-//         LoggerError.Printf("poll is incorrect [%v]", task)
-//     } else {
-//         if err := task.Check(count); err != nil {
-//             LoggerError.Printf("task is not checked [%v]: %v", task, err)
-//         }
-//     }
-// }
+    // read the file line by line
+    scanner := bufio.NewScanner(file)
+    counter = 0
+    for scanner.Scan() {
+        clines++
+        if f.Pos < clines {
+            if line := scanner.Text(); len(line) > 0 {
+                if f.RgPattern.MatchString(line) {
+                    switch {
+                        case counter < (maxMsgLines + 1):
+                            msgLines = append(msgLines, line)
+                        case counter == (maxMsgLines + 1):
+                            msgLines = append(msgLines, "...")
+                    }
+                    counter++
+                }
+            }
+        }
+    }
+    curHours := uint64(time.Since(f.LogStart).Hours())
+    if curHours != f.Period {
+        f.Period = curHours
+        f.Found = 0
+        f.Counter = 0
+    }
+    f.Pos = clines
+    f.Found += counter
 
-// Poll reads file lines and counts needed from them.
-// It skips "pos" lines.
-// func (task *Task) Poll() (uint64, error) {
-//     var counter, clines uint64
-//     info, err := os.Stat(task.QFile.Log)
-//     if err != nil {
-//         return counter, err
-//     }
-//     if task.QFile.ModTime.Equal(info.ModTime()) {
-//         // file is not chnaged
-//         return counter, nil
-//     }
-//     file, err := os.Open(task.QFile.Log)
-//     if err != nil {
-//         LoggerError.Printf("can't open file: %v\n", task.QFile.Log)
-//         return counter, err
-//     }
-//     defer file.Close()
-//     // read file line by line
-//     scanner := bufio.NewScanner(file)
-//     for scanner.Scan() {
-//         clines++
-//         // TODO: fix for file rotation
-//         if task.QFile.Pos < clines {
-//             if line := scanner.Text(); line != "" {
-//                 if len(task.QFile.Pattern) > 0 {
-//                     if strings.Contains(line, task.QFile.Pattern) {
-//                         counter++
-//                     }
-//                 } else {
-//                     counter++
-//                 }
-//             }
-//         }
-//     }
-//     task.QFile.Pos = clines
-//     task.QFile.ModTime = info.ModTime()
-//     return counter, nil
-// }
+    needSend := false
+    if (f.Found >= f.ExtBoundary) && (f.Counter <= f.Limit) {
+        needSend = true
+        if f.Increase {
+            f.ExtBoundary = f.ExtBoundary * 2
+        }
+    } else {
+        f.ExtBoundary = f.Boundary
+    }
 
-// // Check calculates currnet found abnormal records for time periods
-// func (task *Task) Check(count uint64) error {
-//     // var needsend bool
-//     // for i := range task.QFile.Counters {
-//     //     task.QFile.Counters[i] += uint64(count)
-//     // }
-//     // hours := uint64(time.Since(task.QFile.LogStart).Hours())
-//     // if task.QFile.Hours != hours {
-//     //     days := hours % 24
-//     //     weeks := days % 7
-//     //     switch {
-//     //         case (task.QFile.Hours % 168) != weeks:
-//     //              task.QFile.Counters = [3]uint64{0,0,0}
-//     //         case (task.QFile.Hours % 24) != days:
-//     //             task.QFile.Counters[0:1] = [2]uint64{0, 0}
-//     //         default:
-//     //             task.QFile.Counters[0] = 0
-//     //     }
-//     // }
-//     // for i := range task.QFile.Periods {
-//     //     if (task.QFile.Counters[i] >= task.QFile.Boundary) && (task.QFile.States[i] <= task.QFile.RealLimits[i]) {
-//     //         needsend = true
-//     //     }
-//     // }
-
-//     // task.QFile.RealLimits
-
-//     return nil
-// }
+    // send email
+    if needSend {
+        go logger.Notify("message", f.Emails)
+        f.Counter++
+    }
+    return nil
+}
 
 // DebugMode is a initialization of Logger handlers.
 func DebugMode(debugmode bool) {
+    debug = debugmode
     debugHandle := ioutil.Discard
     if debugmode {
         debugHandle = os.Stdout
@@ -509,4 +498,23 @@ func InitConfig(logger *LogChecker, name string) error {
         return err
     }
     return logger.Validate()
+}
+
+// IsMoved creates new inotify watcher if a file was moved, instead returns an error.
+func IsMoved(filename string, oldw *inotify.Watcher) (*inotify.Watcher, error) {
+    var neww *inotify.Watcher
+    time.Sleep(moveWait)
+    if _, err := os.Stat(filename); err != nil {
+        oldw.RemoveWatch(filename)
+        return neww, err
+    }
+    neww, err := inotify.NewWatcher()
+    if err != nil {
+        return neww, err
+    }
+    err = neww.AddWatch(filename, watcherMask)
+    if err != nil {
+        return neww, err
+    }
+    return neww, nil
 }
