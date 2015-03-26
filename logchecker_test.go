@@ -180,7 +180,7 @@ func TestInitConfig(t *testing.T) {
     }
 
     if len(logger.Cfg.Observed) > 1 {
-        logger.Cfg.Observed[1].Name = "Nginx"
+        logger.Cfg.Observed[1].Name = "My service #1"
         if err := logger.Validate(); err == nil {
             t.Errorf("wrong validation [%v]", err)
         }

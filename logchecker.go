@@ -68,6 +68,22 @@ type Backender interface {
     String() string
 }
 
+// Notifier is an interface to notify users about file changes.
+type Notifier interface {
+    String() string
+    Notify(string, []string)
+}
+
+type debugSender struct {
+    Name string
+}
+func (ds *debugSender) String() string {
+    return ds.Name
+}
+func (ds *debugSender) Notify(msg string, to []string) {
+    LoggerDebug.Println(ds)
+}
+
 // File is a type of settings for a watched file.
 type File struct {
     Log string                `json:"file"`
@@ -200,18 +216,18 @@ func (bk *MemoryBackend) String() string {
 }
 
 // String return a details about the configuration.
-// func (cfg Config) String() string {
-//     services := make([]string, len(cfg.Observed))
-//     for i, service := range cfg.Observed {
-//         // services[i] = fmt.Sprintf("%v", service.Name)
-//         files := make([]string, len(service.Files))
-//         for j, file := range service.Files {
-//             files[j] = fmt.Sprintf("File: %v; Pattern: %v; Boundary: %v; Increase: %v; Emails: %v; Limits: %v", file.Log, file.Pattern, file.Boundary, file.Increase, file.Emails, file.Limits)
-//         }
-//         services[i] = fmt.Sprintf("%v\n\t%v", service.Name, strings.Join(files, "\n\t"))
-//     }
-//     return fmt.Sprintf("Config: %v\n sender: %v backend: %v\n---\n%v", cfg.Path, cfg.Sender, cfg.Storage, strings.Join(services, "\n---\n"))
-// }
+func (cfg Config) String() string {
+    services := make([]string, len(cfg.Observed))
+    for i, service := range cfg.Observed {
+        // services[i] = fmt.Sprintf("%v", service.Name)
+        files := make([]string, len(service.Files))
+        for j, file := range service.Files {
+            files[j] = file.Base()
+        }
+        services[i] = fmt.Sprintf("%v: %v", service.Name, strings.Join(files, ", "))
+    }
+    return fmt.Sprintf("Config [%v]: %v\n\t%v\n", cfg.Path, cfg.Storage, strings.Join(services, "\n\t"))
+}
 
 // New created new LogChecker object and returns its reference.
 func New() *LogChecker {
@@ -382,6 +398,7 @@ func (f *File) Check(group *sync.WaitGroup, logger *LogChecker) error {
     var (
         counter, clines uint64
         msgLines []string
+        notifier Notifier
     )
     group.Add(1)
     LoggerDebug.Printf("check: %v\n", f.Base())
@@ -429,15 +446,17 @@ func (f *File) Check(group *sync.WaitGroup, logger *LogChecker) error {
         if f.Increase {
             f.ExtBoundary = f.ExtBoundary * 2
         }
-        LoggerDebug.Printf("check accepted [%v], found=%v, boundary=%v", f.Base(), f.Found, f.ExtBoundary)
-
-        go logger.Notify("message", f.Emails)
+        if debug {
+            notifier = &debugSender{"debugSender"}
+        } else {
+            notifier = logger
+        }
+        go notifier.Notify("message", f.Emails)
         f.Counter++
-
-        LoggerDebug.Printf("email prepare sent [%v], counter=%v, limit=%v", f.Base(), f.Counter, f.Limit)
     } else {
         f.ExtBoundary = f.Boundary
     }
+    LoggerDebug.Printf("check [%v], found=%v, boundary=%v, counter=%v, limit=%v", f.Base(), f.Found, f.ExtBoundary, f.Counter, f.Limit)
     return nil
 }
 

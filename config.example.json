@@ -8,39 +8,36 @@
   },
   "observed": [
     {
-      "name": "Nginx",
+      "name": "My service #1",
       "files": [
         {
           "file": "/var/log/nginx/error.log",
-          "delay": 180,
-          "pattern": "",
+          "pattern": "ERROR",
           "boundary": 1,
           "increase": true,
           "emails": ["user_1@host.com", "user_2@host.com"],
-          "limits": [10, 20, 100]
+          "limit": 3
         },
         {
           "file": "/var/log/nginx/access.log",
-          "delay": 600,
           "pattern": "HTTP/1.1\" 500",
           "boundary": 2,
           "increase": true,
           "emails": ["user_1@host.com"],
-          "limits": [2, 24, 168]
+          "limit": 2
         }
       ]
     },
     {
-      "name": "My service",
+      "name": "My service #2",
       "files": [
         {
           "file": "/var/log/syslog",
-          "delay": 300,
           "pattern": "My service error",
           "boundary": 1,
           "increase": false,
           "emails": ["user_1@host.com", "user_2@host.com"],
-          "limits": [6, 120, 300]
+          "limit": 6
         }
       ]
     }
