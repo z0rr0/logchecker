@@ -30,7 +30,7 @@ cd ${GOPATH}/src/${repo}
 gittag="`$gitbin tag | sort --version-sort | tail -1`"
 gitver="`$gitbin log --oneline | head -1 `"
 build="`date --utc +\"%F %T\"` UTC"
-version="$gittag git:${gitver:0:7} $build"
+version="LogChecker $gittag git:${gitver:0:7} $build"
 
 options=""
 while getopts ":fv" opt; do

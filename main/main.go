@@ -38,8 +38,14 @@ func main() {
     }()
 
     debug := flag.Bool("debug", false, "debug mode")
+    version := flag.Bool("version", false, "show sersion")
     config := flag.String("config", Config, "configuration file")
+
     flag.Parse()
+    if *version {
+        fmt.Println(Version)
+        return
+    }
     logchecker.DebugMode(*debug)
 
     logger := logchecker.New()
