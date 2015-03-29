@@ -17,16 +17,6 @@
 //         // error detected
 //     }
 //
-// Manually initialization of setting to send emails:
-//
-//     logger := logchecker.New()
-//     logger.Cfg.Sender = map[string]string{
-//      "user": "user@host.com",
-//      "password": "password",
-//      "host": "smtp.host.com",
-//      "addr": "smtp.host.com:25",
-//     }
-//
 package logchecker
 
 import (
@@ -59,6 +49,8 @@ var (
     LoggerInfo = log.New(os.Stderr, "INFO [logchecker]: ", log.Ldate|log.Ltime|log.Lshortfile)
     // LoggerDebug implements debug logger, it's disabled by default.
     LoggerDebug = log.New(ioutil.Discard, "DEBUG [logchecker]: ", log.Ldate|log.Lmicroseconds|log.Lshortfile)
+    // PeriodDuration is time before period number increment (seconds)
+    PeriodDuration uint64 = 3600
     initTime = time.Time{}
     debug bool = false
 )
@@ -369,7 +361,7 @@ func (logger *LogChecker) Start(group *sync.WaitGroup) (chan bool, error) {
                 serv.Files[j].LogStart = time.Now()
                 serv.Files[j].ExtBoundary = serv.Files[j].Boundary
                 go serv.Files[j].Watch(group, finish, logger)
-                info[j] = fmt.Sprintf("OK: %s", serv.Files[j].String())
+                info[j] = fmt.Sprintf("OK: %s \"%s\"", serv.Files[j].String(), serv.Files[j].Pattern)
                 watched++
            }
        }
@@ -391,6 +383,12 @@ func (logger *LogChecker) Stop(finish chan bool, group *sync.WaitGroup) error {
     logger.Running = initTime
     LoggerInfo.Printf("%v is stopped\n", logger)
     return nil
+}
+
+// Duration identifies user's time period after watcher start.
+// It's an hour for normal mode and a minute - for debug mode.
+func (f *File) Duration() uint64 {
+    return uint64(time.Since(f.LogStart).Seconds()) % PeriodDuration
 }
 
 // Check validates conditions before sending email notifications.
@@ -432,7 +430,7 @@ func (f *File) Check(group *sync.WaitGroup, logger *LogChecker) error {
             }
         }
     }
-    curHours := uint64(time.Since(f.LogStart).Hours())
+    curHours, sent := f.Duration(), false
     if curHours != f.Period {
         f.Period = curHours
         f.Found = 0
@@ -453,10 +451,11 @@ func (f *File) Check(group *sync.WaitGroup, logger *LogChecker) error {
         }
         go notifier.Notify("message", f.Emails)
         f.Counter++
+        sent = true
     } else {
         f.ExtBoundary = f.Boundary
     }
-    LoggerDebug.Printf("check [%v], found=%v, boundary=%v, counter=%v, limit=%v", f.Base(), f.Found, f.ExtBoundary, f.Counter, f.Limit)
+    LoggerDebug.Printf("check [%v], sent=%v, found=%v, boundary=%v, counter=%v, limit=%v", f.Base(), sent, f.Found, f.ExtBoundary, f.Counter, f.Limit)
     return nil
 }
 

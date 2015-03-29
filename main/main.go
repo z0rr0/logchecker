@@ -21,7 +21,7 @@ import (
 const (
     Config string = "config.json"
     // Period time.Duration = 60 * time.Minute
-    Period time.Duration = 10 * time.Second
+    Period time.Duration = 30 * time.Second
 )
 
 var (
@@ -38,12 +38,13 @@ func main() {
     }()
 
     debug := flag.Bool("debug", false, "debug mode")
-    version := flag.Bool("version", false, "show sersion")
+    version := flag.Bool("version", false, "show version")
     config := flag.String("config", Config, "configuration file")
 
     flag.Parse()
     if *version {
         fmt.Println(Version)
+        flag.PrintDefaults()
         return
     }
     logchecker.DebugMode(*debug)

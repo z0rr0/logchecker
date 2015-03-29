@@ -30,32 +30,6 @@ if err := logchecker.InitConfig(logger, "config.json"); err != nil {
 
 Files for observation can be added using a configuration file, see examples in [config.example.json](https://github.com/z0rr0/logchecker/blob/master/config.example.json).
 
-```javascript
-{
-  "storage": "memory",                          // now only "memory" backend is supported
-  "sender": {                                   // send email through this smtp server
-    "user": "user@host.com",                    // username
-    "password": "password",                     // user password
-    "host": "smtp.host.com",                    // smtp host name
-    "addr": "smtp.host.com:25"                  // server address + port
-  },
-  "observed": [                                 // array of observed services
-    {
-      "name": "Nginx",                          // unique service name
-      "files": [                                // array of files for observation
-        {
-          "file": "/var/log/nginx/error.log",   // file for observation
-          "delay": 180,                         // delay between checks
-          "pattern": "ERROR",                   // to account lines with the pattern
-          "boundary": 1,                        // send email if sum greater than boundary value
-          "increase": true,                     // increase boundary value as 2^n
-          "emails": ["user_1@host.com"],        // send email to these users
-          "limist": [10, 20, 100]               // emails' limits: per hour / day / week
-        }
-      ]
-    }
-  ]
-}
 ```
 
 ### Testing
