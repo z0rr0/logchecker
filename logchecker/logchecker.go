@@ -37,7 +37,6 @@ import (
 )
 
 const (
-    moveWait = 5 * time.Second
     watcherMask uint32 = inotify.IN_CLOSE_WRITE | inotify.IN_DELETE_SELF
     maxMsgLines uint64 = 10
 )
@@ -53,6 +52,7 @@ var (
     PeriodDuration uint64 = 3600
     initTime = time.Time{}
     debug bool = false
+    MoveWait = 5 * time.Second
 )
 
 // Backender is an interface to handle data storage operations.
@@ -240,19 +240,19 @@ func (logger *LogChecker) String() string {
 // HasService checks that the Service is included to the LogChecker.
 // It can use locked mode to guarantee that service array will be
 // immutable during reading.
-func (logger *LogChecker) HasService(serv *Service, lock bool) bool {
+func (logger *LogChecker) HasService(serv *Service, lock bool) int {
     if lock {
         logger.mutex.RLock()
         defer func() {
             logger.mutex.RUnlock()
         }()
     }
-    for _, s := range logger.Cfg.Observed {
+    for i, s := range logger.Cfg.Observed {
         if s.Name == serv.Name {
-            return true
+            return i
         }
     }
-    return false
+    return -1
 }
 
 // AddService includes a new Service to the LogChecker.
@@ -267,11 +267,29 @@ func (logger *LogChecker) AddService(serv *Service) error {
     if len(serv.Name) == 0 {
         return fmt.Errorf("service name should not be empty")
     }
-    if logger.HasService(serv, false) {
+    if logger.HasService(serv, false) > -1 {
         return fmt.Errorf("service [%v] is already used", serv.Name)
     }
     logger.Cfg.Observed = append(logger.Cfg.Observed, *serv)
     LoggerDebug.Printf("new service is added: %v\n", serv.Name)
+    return nil
+}
+
+// RemoveService includes a new Service to the LogChecker.
+func (logger *LogChecker) RemoveService(serv *Service) error {
+    if logger.IsWorking() {
+        return fmt.Errorf("logchecker is already running")
+    }
+    logger.mutex.Lock()
+    defer func() {
+        logger.mutex.Unlock()
+    }()
+    index := logger.HasService(serv, false)
+    if index == -1 {
+        return fmt.Errorf("service not found: %v", serv.Name)
+    }
+    logger.Cfg.Observed = append(logger.Cfg.Observed[0:index], logger.Cfg.Observed[index+1:]...)
+    LoggerDebug.Printf("service is removed: %v\n", serv.Name)
     return nil
 }
 
@@ -520,7 +538,7 @@ func InitConfig(logger *LogChecker, name string) error {
 // IsMoved creates new inotify watcher if a file was moved, instead returns an error.
 func IsMoved(filename string, oldw *inotify.Watcher) (*inotify.Watcher, error) {
     var neww *inotify.Watcher
-    time.Sleep(moveWait)
+    time.Sleep(MoveWait)
     if _, err := os.Stat(filename); err != nil {
         oldw.RemoveWatch(filename)
         return neww, err

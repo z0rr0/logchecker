@@ -9,8 +9,9 @@ package logchecker
 import (
     "os"
     // "fmt"
-    "log"
-    "runtime"
+    // "log"
+    // "runtime"
+    "time"
     "testing"
     "strings"
     "io/ioutil"
@@ -31,29 +32,22 @@ func createFile(name string, mode int) error {
         return err
     }
     file.Close()
-    if runtime.GOOS == "windows" {
-        log.Printf("windows OS detected, skipped Chmod [%v]\n", name)
-        return nil
-    }
     return os.Chmod(name, os.FileMode(mode))
 }
 
 func prepareConfig(from, to string, replace map[string]string) error {
-    // newfiles := [3]string("error.log", "access.log", "syslog")
     data, err := ioutil.ReadFile(from)
     if err != nil {
         return err
     }
     strinfo := string(data)
     for k, v := range replace {
-        if runtime.GOOS == "windows" {
-            v = strings.Replace(v, "\\", "\\\\", -1)
-        }
         strinfo = strings.Replace(strinfo, k, v, 1)
     }
     return ioutil.WriteFile(to, []byte(strinfo), os.FileMode(0666))
 }
 
+// Tests
 
 func TestDebugMode(t *testing.T) {
     if (LoggerError == nil) || (LoggerDebug == nil) {
@@ -69,6 +63,79 @@ func TestDebugMode(t *testing.T) {
     }
 }
 
+func TestFilePath(t *testing.T) {
+    if _, err := FilePath("invalid_name"); err == nil {
+        t.Errorf("incorrect response")
+    }
+    if _, err := FilePath(""); err == nil {
+        t.Errorf("incorrect response")
+    }
+    realfile := filepath.Join(buildDir(), "config.example.json")
+    if path, err := FilePath(realfile); err != nil {
+        t.Errorf("incorrect response, the file should exist")
+    } else {
+        if path != realfile {
+            t.Errorf("ivalid paths")
+        }
+    }
+}
+
+func TestInitConfig(t *testing.T) {
+    rm := func(name string) {
+        if err := os.Remove(name); err != nil {
+            t.Errorf("can't remove file [%v]: %v", name, err)
+        }
+    }
+    testdir := buildDir()
+    newvalues := map[string]string{
+        "/var/log/nginx/error.log": filepath.Join(testdir, "test_error.log"),
+        "/var/log/nginx/access.log": filepath.Join(testdir, "test_access.log"),
+        "/var/log/syslog": filepath.Join(testdir, "test_syslog"),
+    }
+    oldexample := filepath.Join(testdir, "config.example.json")
+    example := filepath.Join(testdir, "config.new.json")
+    if err := prepareConfig(oldexample, example, newvalues); err != nil {
+        t.Errorf("can't prepare test config file [%v]", err)
+    }
+    defer rm(example)
+    for _, v := range newvalues {
+        if err := createFile(v, 0666); err != nil {
+            t.Errorf("test file preparation error [%v]: %v", v, err)
+        }
+        defer rm(v)
+    }
+    logger := New()
+    if err := InitConfig(logger, example); err != nil {
+        t.Errorf("error during InitConfig [%v]: %v", example, err)
+    }
+    if l := len(logger.Cfg.String()); l == 0 {
+        t.Errorf("config should be initiated [%v]", l)
+    }
+
+    // checks of incorrect configurations
+    if len(logger.Cfg.Observed) > 1 {
+        logger.Cfg.Observed[0].Name = logger.Cfg.Observed[1].Name
+        if err := logger.Validate(); err == nil {
+            t.Errorf("wrong validation [%v]", err)
+        }
+    }
+    if err := InitConfig(logger, "invalid_name"); err == nil {
+        t.Errorf("need error during InitConfig")
+    }
+    testfile := filepath.Join(testdir, "testfile.json")
+    if err := createFile(testfile, 0200); err != nil {
+        t.Errorf("%v", err)
+    }
+    defer rm(testfile)
+    if err := InitConfig(logger, testfile); err == nil {
+        t.Errorf("need permissions error during InitConfig")
+    }
+    os.Chmod(testfile, 0666)
+    if err := InitConfig(logger, testfile); err == nil {
+        t.Errorf("need json error during InitConfig")
+    }
+}
+
 func TestNew(t *testing.T) {
     logger := New()
     if logger == nil {
@@ -78,17 +145,27 @@ func TestNew(t *testing.T) {
     if err := logger.AddService(&serv); err == nil {
         t.Errorf("incorrect response for empty Service: %v\n", err)
     }
+    if err := logger.RemoveService(&serv); err == nil {
+        t.Errorf("incorrect response: %v\n", err)
+    }
     serv.Name = "TestSrv"
-    if logger.HasService(&serv, true) {
+    if logger.HasService(&serv, true) > -1 {
         t.Errorf("incorrect response")
     }
     if err := logger.AddService(&serv); err != nil {
         t.Errorf("incorrect response: %v\n", err)
     }
-    if !logger.HasService(&serv, true) {
+    if logger.HasService(&serv, true) == -1 {
         t.Errorf("incorrect response")
     }
     if err := logger.AddService(&serv); err == nil {
+        t.Errorf("incorrect response: %v\n", err)
+    }
+    if err := logger.RemoveService(&serv); err != nil {
+        t.Errorf("incorrect response: %v\n", err)
+    }
+    //
+    if err := logger.AddService(&serv); err != nil {
         t.Errorf("incorrect response: %v\n", err)
     }
     if err := logger.Validate(); err == nil {
@@ -121,91 +198,48 @@ func TestNew(t *testing.T) {
     if err := logger.Validate(); err == nil {
         t.Errorf("incorrect response: %v\n", err)
     }
-    logger.Cfg.Storage = "memory"
-    if err := logger.Validate(); err != nil {
+    fileExample := File{}
+    logger.Cfg.Observed[0].Files = append(logger.Cfg.Observed[0].Files, fileExample)
+    // unknown backend
+    if err := logger.Validate(); err == nil {
         t.Errorf("incorrect response: %v\n", err)
     }
-    if logger.Backend.String() != "Backend: Memory" {
-        t.Errorf("incorrect backend name: %v\n", logger.Backend.String())
+    logger.Cfg.Storage = "memory"
+    if err := logger.Validate(); err == nil {
+        t.Errorf("incorrect response: %v\n", err)
     }
-}
+    logger.Cfg.Observed[0].Files[0].Log = "/tmp/wrong"
+    if err := logger.Validate(); err == nil {
+        t.Errorf("incorrect response: %v\n", err)
+    }
 
-func TestFilePath(t *testing.T) {
-    if _, err := FilePath("invalid_name"); err == nil {
-        t.Errorf("incorrect response")
-    }
-    if _, err := FilePath(""); err == nil {
-        t.Errorf("incorrect response")
-    }
-    // if _, err := FilePath("unknown"); err == nil {
-    //     t.Errorf("incorrect response")
-    // }
-    realfile := filepath.Join(buildDir(), "config.example.json")
-    if path, err := FilePath(realfile); err != nil {
-        t.Errorf("incorrect response, the file should exist")
-    } else {
-        if path != realfile {
-            t.Errorf("ivalid paths")
-        }
-    }
-}
-
-func TestInitConfig(t *testing.T) {
     rm := func(name string) {
         if err := os.Remove(name); err != nil {
             t.Errorf("can't remove file [%v]: %v", name, err)
         }
     }
     testdir := buildDir()
-    newvalues := map[string]string{
-        "/var/log/nginx/error.log": filepath.Join(testdir, "error.log"),
-        "/var/log/nginx/access.log": filepath.Join(testdir, "access.log"),
-        "/var/log/syslog": filepath.Join(testdir, "syslog"),
+    filename := filepath.Join(testdir, "test_config.log")
+    if err := createFile(filename, 0666); err != nil {
+        t.Errorf("test file preparation error [%v]", err)
     }
-    oldexample := filepath.Join(testdir, "config.example.json")
-    example := filepath.Join(testdir, "config.new.json")
-    if err := prepareConfig(oldexample, example, newvalues); err != nil {
-        t.Errorf("can't prepare test config file [%v]", err)
+    defer rm(filename)
+
+    logger.Cfg.Observed[0].Files[0].Log = filename
+    if err := logger.Validate(); err == nil {
+        t.Errorf("incorrect response: %v\n", err)
     }
-    defer rm(example)
-    for _, v := range newvalues {
-        if err := createFile(v, 0666); err != nil {
-            t.Errorf("test file preparation error [%v]", err)
-        }
-        defer rm(v)
+    logger.Cfg.Observed[0].Files[0].Pattern = "**"
+    if err := logger.Validate(); err == nil {
+        t.Errorf("incorrect response: %v\n", err)
     }
-    logger := New()
-    if err := InitConfig(logger, example); err != nil {
-        t.Errorf("error during InitConfig [%v]: %v", example, err)
+    if len(logger.String()) == 0 {
+        t.Errorf("invalid logger")
     }
 
-    if len(logger.Cfg.Observed) > 1 {
-        logger.Cfg.Observed[1].Name = "My service #1"
-        if err := logger.Validate(); err == nil {
-            t.Errorf("wrong validation [%v]", err)
-        }
-    }
-    // if l := len(logger.Cfg.String()); l <= 0 {
-    //     t.Errorf("config should be initiated [%v]", l)
-    // }
-    if err := InitConfig(logger, "invalid_name"); err == nil {
-        t.Errorf("need error during InitConfig")
-    }
-
-    testfile := filepath.Join(testdir, "testfile.json")
-    if err := createFile(testfile, 0200); err != nil {
-        t.Errorf("%v", err)
-    }
-    defer rm(testfile)
-
-    if err := InitConfig(logger, testfile); err == nil {
-        t.Errorf("need permissions error during InitConfig")
-    }
-    if runtime.GOOS == "windows" {
-        return
-    }
-    os.Chmod(testfile, 0666)
-    if err := InitConfig(logger, testfile); err == nil {
-        t.Errorf("need json error during InitConfig")
-    }
 }
+
+// func TestIsMoved(t *testing.T) {
+//     MoveWait = 1 * time.Second
+
+// }
