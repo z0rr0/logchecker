@@ -8,14 +8,13 @@ package logchecker
 
 import (
     "os"
-    // "fmt"
-    // "log"
-    // "runtime"
-    "time"
-    "testing"
-    "strings"
+    "bufio"
+    "golang.org/x/exp/inotify"
     "io/ioutil"
     "path/filepath"
+    "strings"
+    "testing"
+    "time"
 )
 
 func buildDir() string {
@@ -33,6 +32,32 @@ func createFile(name string, mode int) error {
     }
     file.Close()
     return os.Chmod(name, os.FileMode(mode))
+}
+
+func updateFile(name string, lines ...string) error {
+    file, err := os.OpenFile(name, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+    if err != nil {
+        return err
+    }
+    defer file.Close()
+    writer := bufio.NewWriter(file)
+    for _, v := range lines {
+        _, err := writer.WriteString(v + "\n")
+        if err != nil {
+            return err
+        }
+    }
+    return writer.Flush()
+}
+
+func moveFile(name, first string) error {
+    tmpfile := filepath.Join(buildDir(), "test_tmp")
+    err := createFile(tmpfile, 0666)
+    if err != nil {
+        return err
+    }
+    // defer os.Remove(tmpfile)
+    return os.Rename(tmpfile, name)
 }
 
 func prepareConfig(from, to string, replace map[string]string) error {
@@ -239,7 +264,59 @@ func TestNew(t *testing.T) {
 
 }
 
-// func TestIsMoved(t *testing.T) {
-//     MoveWait = 1 * time.Second
+func TestIsMoved(t *testing.T) {
+    MoveWait = 1 * time.Second
+    // rm := func(name string) {
+    //     if err := os.Remove(name); err != nil {
+    //         t.Errorf("can't remove file [%v]: %v", name, err)
+    //     }
+    // }
+    testfile := filepath.Join(buildDir(), "test_error.log")
+    err := createFile(testfile, 0666)
+    if err != nil {
+        t.Errorf("test file preparation error [%v]: %v", testfile, err)
+    }
+    // defer rm(testfile)
 
-// }
+    watcher, err := inotify.NewWatcher()
+    if err != nil {
+        t.Errorf("cant create inotify watcher")
+    }
+    if err = watcher.AddWatch(testfile, inotify.IN_CLOSE_WRITE | inotify.IN_ATTRIB); err != nil {
+        t.Errorf("cant add inotify watcher")
+    }
+
+    go func() {
+        time.Sleep(100 * time.Millisecond)
+        if err := updateFile(testfile, "new line"); err != nil {
+            t.Errorf("cant update file %v", err)
+        }
+        time.Sleep(100 * time.Millisecond)
+        if err := moveFile(testfile, "init line"); err != nil {
+            t.Errorf("cant move file %v", err)
+        }
+        time.Sleep(1100 * time.Millisecond)
+        if err := os.Remove(testfile); err != nil {
+            t.Errorf("cant remove file")
+        }
+    }()
+
+    func() {
+        for {
+            select {
+                case event := <-watcher.Event:
+                    t.Log("file udpate detected", event.String())
+                    if (event.Mask & inotify.IN_ATTRIB) != 0 {
+                        watcher, err = IsMoved(testfile, watcher)
+                        if err != nil {
+                            t.Log("file was removed")
+                            return
+                        }
+                    }
+                case err := <-watcher.Error:
+                    t.Errorf("watcher error: %v", err)
+                    return
+            }
+        }
+    }()
+}

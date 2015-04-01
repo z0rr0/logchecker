@@ -13,17 +13,19 @@
         {
           "file": "/var/log/nginx/error.log",
           "pattern": "ERROR",
-          "boundary": 1,
           "increase": true,
           "emails": ["user_1@host.com", "user_2@host.com"],
+          "boundary": 1,
+          "period": 3600,
           "limit": 3
         },
         {
           "file": "/var/log/nginx/access.log",
           "pattern": "HTTP/1.1\" 500",
-          "boundary": 2,
           "increase": true,
           "emails": ["user_1@host.com"],
+          "boundary": 2,
+          "period": 7200,
           "limit": 2
         }
       ]
@@ -34,9 +36,10 @@
         {
           "file": "/var/log/syslog",
           "pattern": "My service error",
-          "boundary": 1,
           "increase": false,
           "emails": ["user_1@host.com", "user_2@host.com"],
+          "boundary": 1,
+          "period": 3600,
           "limit": 6
         }
       ]

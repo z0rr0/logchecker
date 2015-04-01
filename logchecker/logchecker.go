@@ -37,8 +37,9 @@ import (
 )
 
 const (
-    watcherMask uint32 = inotify.IN_CLOSE_WRITE | inotify.IN_DELETE_SELF
+    watcherMask uint32 = inotify.IN_CLOSE_WRITE | inotify.IN_ATTRIB
     maxMsgLines uint64 = 10
+    emailMsg string = "LogChecker notification.\n"
 )
 
 var (
@@ -48,11 +49,11 @@ var (
     LoggerInfo = log.New(os.Stderr, "INFO [logchecker]: ", log.Ldate|log.Ltime|log.Lshortfile)
     // LoggerDebug implements debug logger, it's disabled by default.
     LoggerDebug = log.New(ioutil.Discard, "DEBUG [logchecker]: ", log.Ldate|log.Lmicroseconds|log.Lshortfile)
-    // PeriodDuration is time before period number increment (seconds)
-    PeriodDuration uint64 = 3600
-    initTime = time.Time{}
+    // MoveWait is waiting period before a check that a file was again created.
+    MoveWait = 2 * time.Second
+
     debug bool = false
-    MoveWait = 5 * time.Second
+    initTime = time.Time{}
 )
 
 // Backender is an interface to handle data storage operations.
@@ -84,15 +85,14 @@ type File struct {
     Increase bool             `json:"increase"`
     Emails []string           `json:"emails"`
     Limit uint64              `json:"limit"`
+    Period uint64             `json:"period"`
     RgPattern *regexp.Regexp  // regexp expression from the pattern
     Pos uint64                // file posision after last check
     LogStart time.Time        // time of logger start
-    Period uint64             // number of a hour after last check
+    Granularity uint64        // number of a period after last check
     Found uint64              // found by the Pattern
     Counter uint64            // cases counter for time period
     ExtBoundary uint64        // extended boundary value if Increase is set
-
-    States [3]uint64          // counter of sent emails
 }
 
 // Service is a type of settings for a watched service.
@@ -183,7 +183,7 @@ func (f *File) Watch(group *sync.WaitGroup, finish chan bool, logger *LogChecker
             case <-finish:
                 return
             case event := <-watcher.Event:
-                if (event.Mask & inotify.IN_DELETE_SELF) != 0 {
+                if (event.Mask & inotify.IN_ATTRIB) != 0 {
                     LoggerInfo.Printf("file was deleted or moved: %v\n", f.Base())
                     watcher, err = IsMoved(f.Log, watcher)
                     if err != nil {
@@ -404,9 +404,8 @@ func (logger *LogChecker) Stop(finish chan bool, group *sync.WaitGroup) error {
 }
 
 // Duration identifies user's time period after watcher start.
-// It's an hour for normal mode and a minute - for debug mode.
 func (f *File) Duration() uint64 {
-    return uint64(time.Since(f.LogStart).Seconds()) % PeriodDuration
+    return uint64(time.Since(f.LogStart).Seconds()) / f.Period
 }
 
 // Check validates conditions before sending email notifications.
@@ -448,12 +447,12 @@ func (f *File) Check(group *sync.WaitGroup, logger *LogChecker) error {
             }
         }
     }
-    curHours, sent := f.Duration(), false
-    if curHours != f.Period {
-        f.Period = curHours
+    curPeriod, sent := f.Duration(), false
+    if curPeriod != f.Granularity {
+        f.Granularity = curPeriod
         f.Found = 0
         f.Counter = 0
-        LoggerDebug.Printf("period was reset [%v]", f.Base())
+        LoggerDebug.Printf("period was reset [%v]: %v", f.Base(), f.Granularity)
     }
     f.Pos = clines
     f.Found += counter
@@ -467,7 +466,8 @@ func (f *File) Check(group *sync.WaitGroup, logger *LogChecker) error {
         } else {
             notifier = logger
         }
-        go notifier.Notify("message", f.Emails)
+        message := fmt.Sprintf("%v\n%v\n\n--\nBR, LogChecker", emailMsg, strings.Join(msgLines, "\n"))
+        go notifier.Notify(message, f.Emails)
         f.Counter++
         sent = true
     } else {
