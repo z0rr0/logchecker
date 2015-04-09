@@ -7,12 +7,15 @@
 package logchecker
 
 import (
-    "os"
     "bufio"
     "golang.org/x/exp/inotify"
     "io/ioutil"
+    "os"
+    "os/signal"
     "path/filepath"
     "strings"
+    "sync"
+    "syscall"
     "testing"
     "time"
 )
@@ -174,6 +177,9 @@ func TestNew(t *testing.T) {
         t.Errorf("incorrect response: %v\n", err)
     }
     serv.Name = "TestSrv"
+    if serv.String() != "TestSrv" {
+        t.Errorf("invalid service name")
+    }
     if logger.HasService(&serv, true) > -1 {
         t.Errorf("incorrect response")
     }
@@ -261,7 +267,6 @@ func TestNew(t *testing.T) {
     if len(logger.String()) == 0 {
         t.Errorf("invalid logger")
     }
-
 }
 
 func TestIsMoved(t *testing.T) {
@@ -305,7 +310,7 @@ func TestIsMoved(t *testing.T) {
         for {
             select {
                 case event := <-watcher.Event:
-                    t.Log("file udpate detected", event.String())
+                    t.Log("file update detected", event.String())
                     if (event.Mask & inotify.IN_ATTRIB) != 0 {
                         watcher, err = IsMoved(testfile, watcher)
                         if err != nil {
@@ -319,4 +324,98 @@ func TestIsMoved(t *testing.T) {
             }
         }
     }()
+}
+
+func TestStart(t *testing.T) {
+    var (
+        group sync.WaitGroup
+        Period time.Duration = 30 * time.Second
+    )
+    rm := func(name string) {
+        if err := os.Remove(name); err != nil {
+            t.Errorf("can't remove file [%v]: %v", name, err)
+        }
+    }
+    DebugMode(true)
+    testdir := buildDir()
+    newvalues := map[string]string{
+        "/var/log/nginx/error.log": filepath.Join(testdir, "test_error.log"),
+        "/var/log/nginx/access.log": filepath.Join(testdir, "test_access.log"),
+        "/var/log/syslog": filepath.Join(testdir, "test_syslog"),
+    }
+    oldexample := filepath.Join(testdir, "config.example.json")
+    example := filepath.Join(testdir, "config.new.json")
+    if err := prepareConfig(oldexample, example, newvalues); err != nil {
+        t.Errorf("can't prepare test config file [%v]", err)
+    }
+    defer rm(example)
+    for _, v := range newvalues {
+        if err := createFile(v, 0666); err != nil {
+            t.Errorf("test file preparation error [%v]: %v", v, err)
+        }
+        defer rm(v)
+    }
+
+    logger := New()
+    if err := InitConfig(logger, example); err != nil {
+        t.Error(err)
+    }
+    logger.Name = "Test-LogChecker"
+    // process start
+    finish, err := logger.Start(&group)
+    if err != nil {
+        t.Error(err)
+    }
+     // config monitoring
+    watcher, err := inotify.NewWatcher()
+    if err != nil {
+        t.Error(err)
+    }
+    if err = watcher.AddWatch(logger.Cfg.Path, watcherMask); err != nil {
+        close(finish)
+        t.Errorf("can't activate config watcher: %v\n", err)
+    }
+    timestat := time.Tick(Period)
+    sigchan := make(chan os.Signal, 2)
+    signal.Notify(sigchan, os.Interrupt, syscall.SIGTERM)
+
+    // notificationCounter := 2
+
+    for {
+        select {
+            case <-sigchan:
+                t.Log("process will be stopped")
+                close(finish)
+                group.Wait()
+                return
+            case event := <-watcher.Event:
+                t.Log("process will be resarted due to reconfiguration")
+                if (event.Mask & inotify.IN_DELETE_SELF) != 0 {
+                    watcher, err = IsMoved(logger.Cfg.Path, watcher)
+                    if err != nil {
+                        t.Errorf("re-creation watcher error: %v\n", err)
+                    }
+                }
+                if err = logger.Stop(finish, &group); err != nil {
+                    t.Error(err)
+                }
+                err = InitConfig(logger, logger.Cfg.Path)
+                if err != nil {
+                    t.Error(err)
+                }
+                finish, err = logger.Start(&group)
+                if err != nil {
+                    t.Errorf("can't start the process: %v\n", err)
+                    t.Error(err)
+                }
+            case werr := <-watcher.Error:
+                t.Errorf("config watcher error: %v\n", werr)
+                if err = logger.Stop(finish, &group); err != nil {
+                    t.Error(err)
+                }
+                t.Error(werr)
+            case <- timestat:
+                t.Log("statictics: %v", logger)
+        }
+    }
 }

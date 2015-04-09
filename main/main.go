@@ -68,10 +68,9 @@ func main() {
         logchecker.LoggerError.Printf("can't create config watcher: %v\n", err)
         logchecker.LoggerError.Panicln(err)
     }
-    if err = watcher.AddWatch(logger.Cfg.Path, inotify.IN_CLOSE_WRITE | inotify.IN_DELETE_SELF); err != nil {
+    if err = watcher.AddWatch(logger.Cfg.Path, inotify.IN_CLOSE_WRITE | inotify.IN_ATTRIB); err != nil {
         logchecker.LoggerError.Printf("can't activate config watcher: %v\n", err)
         close(finish)
-        group.Wait()
         logchecker.LoggerError.Panicln(err)
     }
     timestat := time.Tick(Period)

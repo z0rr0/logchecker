@@ -74,7 +74,7 @@ func (ds *debugSender) String() string {
     return ds.Name
 }
 func (ds *debugSender) Notify(msg string, to []string) {
-    LoggerDebug.Println(ds)
+    LoggerDebug.Printf("%v: %v\n", ds, msg)
 }
 
 // File is a type of settings for a watched file.
@@ -124,13 +124,6 @@ type LogChecker struct {
     InWork int
     mutex sync.RWMutex
 }
-
-// Task is an object of logging task.
-// type Task struct {
-//     QLogChecker *LogChecker
-//     QService *Service
-//     QFile *File
-// }
 
 // String returns absolute file's path.
 func (s Service) String() string {
@@ -200,6 +193,80 @@ func (f *File) Watch(group *sync.WaitGroup, finish chan bool, logger *LogChecker
                 return
         }
     }
+}
+
+// Duration identifies user's time period after watcher start.
+func (f *File) Duration() uint64 {
+    return uint64(time.Since(f.LogStart).Seconds()) / f.Period
+}
+
+// Check validates conditions before sending email notifications.
+func (f *File) Check(group *sync.WaitGroup, logger *LogChecker) error {
+    var (
+        counter, clines uint64
+        msgLines []string
+        notifier Notifier
+    )
+    group.Add(1)
+    LoggerDebug.Printf("check: %v\n", f.Base())
+    defer func() {
+        LoggerDebug.Printf("check done: %v\n", f.Base())
+        group.Done()
+    }()
+
+    file, err := os.Open(f.Log)
+    if err != nil {
+        return err
+    }
+    defer file.Close()
+
+    // read the file line by line
+    scanner := bufio.NewScanner(file)
+    counter = 0
+    for scanner.Scan() {
+        clines++
+        if f.Pos < clines {
+            if line := scanner.Text(); len(line) > 0 {
+                if f.RgPattern.MatchString(line) {
+                    switch {
+                        case counter < (maxMsgLines + 1):
+                            msgLines = append(msgLines, line)
+                        case counter == (maxMsgLines + 1):
+                            msgLines = append(msgLines, "...")
+                    }
+                    counter++
+                }
+            }
+        }
+    }
+    curPeriod, sent := f.Duration(), false
+    if curPeriod != f.Granularity {
+        f.Granularity = curPeriod
+        f.Found = 0
+        f.Counter = 0
+        LoggerDebug.Printf("period was reset [%v]: %v", f.Base(), f.Granularity)
+    }
+    f.Pos = clines
+    f.Found += counter
+
+    if (f.Found >= f.ExtBoundary) && (f.Counter <= f.Limit) {
+        if f.Increase {
+            f.ExtBoundary = f.ExtBoundary * 2
+        }
+        if debug {
+            notifier = &debugSender{"debugSender"}
+        } else {
+            notifier = logger
+        }
+        message := fmt.Sprintf("%v\n%v\n\n--\nBR, LogChecker", emailMsg, strings.Join(msgLines, "\n"))
+        go notifier.Notify(message, f.Emails)
+        f.Counter++
+        sent = true
+    } else {
+        f.ExtBoundary = f.Boundary
+    }
+    LoggerDebug.Printf("check [%v], sent=%v, found=%v, boundary=%v, counter=%v, limit=%v", f.Base(), sent, f.Found, f.ExtBoundary, f.Counter, f.Limit)
+    return nil
 }
 
 // String of MemoryBackend returns a name of the logger back-end.
@@ -400,80 +467,6 @@ func (logger *LogChecker) Stop(finish chan bool, group *sync.WaitGroup) error {
     group.Wait()
     logger.Running = initTime
     LoggerInfo.Printf("%v is stopped\n", logger)
-    return nil
-}
-
-// Duration identifies user's time period after watcher start.
-func (f *File) Duration() uint64 {
-    return uint64(time.Since(f.LogStart).Seconds()) / f.Period
-}
-
-// Check validates conditions before sending email notifications.
-func (f *File) Check(group *sync.WaitGroup, logger *LogChecker) error {
-    var (
-        counter, clines uint64
-        msgLines []string
-        notifier Notifier
-    )
-    group.Add(1)
-    LoggerDebug.Printf("check: %v\n", f.Base())
-    defer func() {
-        LoggerDebug.Printf("check done: %v\n", f.Base())
-        group.Done()
-    }()
-
-    file, err := os.Open(f.Log)
-    if err != nil {
-        return err
-    }
-    defer file.Close()
-
-    // read the file line by line
-    scanner := bufio.NewScanner(file)
-    counter = 0
-    for scanner.Scan() {
-        clines++
-        if f.Pos < clines {
-            if line := scanner.Text(); len(line) > 0 {
-                if f.RgPattern.MatchString(line) {
-                    switch {
-                        case counter < (maxMsgLines + 1):
-                            msgLines = append(msgLines, line)
-                        case counter == (maxMsgLines + 1):
-                            msgLines = append(msgLines, "...")
-                    }
-                    counter++
-                }
-            }
-        }
-    }
-    curPeriod, sent := f.Duration(), false
-    if curPeriod != f.Granularity {
-        f.Granularity = curPeriod
-        f.Found = 0
-        f.Counter = 0
-        LoggerDebug.Printf("period was reset [%v]: %v", f.Base(), f.Granularity)
-    }
-    f.Pos = clines
-    f.Found += counter
-
-    if (f.Found >= f.ExtBoundary) && (f.Counter <= f.Limit) {
-        if f.Increase {
-            f.ExtBoundary = f.ExtBoundary * 2
-        }
-        if debug {
-            notifier = &debugSender{"debugSender"}
-        } else {
-            notifier = logger
-        }
-        message := fmt.Sprintf("%v\n%v\n\n--\nBR, LogChecker", emailMsg, strings.Join(msgLines, "\n"))
-        go notifier.Notify(message, f.Emails)
-        f.Counter++
-        sent = true
-    } else {
-        f.ExtBoundary = f.Boundary
-    }
-    LoggerDebug.Printf("check [%v], sent=%v, found=%v, boundary=%v, counter=%v, limit=%v", f.Base(), sent, f.Found, f.ExtBoundary, f.Counter, f.Limit)
     return nil
 }
 
