@@ -51,8 +51,10 @@ var (
     LoggerDebug = log.New(ioutil.Discard, "DEBUG [logchecker]: ", log.Ldate|log.Lmicroseconds|log.Lshortfile)
     // MoveWait is waiting period before a check that a file was again created.
     MoveWait = 2 * time.Second
+    // EmailSimulator is a file path to verify sent emails during debug mode.
+    EmailSimulator string
 
-    debug bool = false
+    debug = false
     initTime = time.Time{}
 )
 
@@ -74,7 +76,35 @@ func (ds *debugSender) String() string {
     return ds.Name
 }
 func (ds *debugSender) Notify(msg string, to []string) {
-    LoggerDebug.Printf("%v: %v\n", ds, msg)
+    LoggerDebug.Printf("call EmailSimulator (%v)", EmailSimulator)
+    writeLine := fmt.Sprintf("%v: get message (%v symbols) for [%v]\n", time.Now(), len(msg), strings.Join(to, ", "))
+    if len(EmailSimulator) == 0 {
+        LoggerDebug.Println("call Notify simulator with empty file path")
+        LoggerDebug.Printf(writeLine)
+    } else {
+        if !filepath.IsAbs(EmailSimulator) {
+            LoggerError.Println("path should be absolute")
+            return
+        }
+        _, err := os.Stat(EmailSimulator);
+        if err != nil {
+            LoggerError.Printf("unknown file: %v", err)
+            return
+        }
+        file, err := os.OpenFile(EmailSimulator, os.O_APPEND|os.O_WRONLY, 0660)
+        if err != nil {
+            LoggerError.Println(err)
+            return
+        }
+        defer file.Close()
+        writer := bufio.NewWriter(file)
+        _, err = writer.WriteString(writeLine)
+        if err != nil {
+            LoggerError.Println(err)
+            return
+        }
+        writer.Flush()
+    }
 }
 
 // File is a type of settings for a watched file.
@@ -90,9 +120,10 @@ type File struct {
     Pos uint64                // file posision after last check
     LogStart time.Time        // time of logger start
     Granularity uint64        // number of a period after last check
-    Found uint64              // found by the Pattern
+    Found uint64              // found lines by the Pattern
     Counter uint64            // cases counter for time period
     ExtBoundary uint64        // extended boundary value if Increase is set
+    service *Service          // backward reference to service name
 }
 
 // Service is a type of settings for a watched service.
@@ -125,8 +156,8 @@ type LogChecker struct {
     mutex sync.RWMutex
 }
 
-// String returns absolute file's path.
-func (s Service) String() string {
+// String service name.
+func (s *Service) String() string {
     return s.Name
 }
 
@@ -177,7 +208,7 @@ func (f *File) Watch(group *sync.WaitGroup, finish chan bool, logger *LogChecker
                 return
             case event := <-watcher.Event:
                 if (event.Mask & inotify.IN_ATTRIB) != 0 {
-                    LoggerInfo.Printf("file was deleted or moved: %v\n", f.Base())
+                    LoggerInfo.Printf("file was deleted or moved[%v]: %v\n", event, f.Base())
                     watcher, err = IsMoved(f.Log, watcher)
                     if err != nil {
                         LoggerError.Printf("re-creation watcher error: %v\n", err)
@@ -230,7 +261,7 @@ func (f *File) Check(group *sync.WaitGroup, logger *LogChecker) error {
                 if f.RgPattern.MatchString(line) {
                     switch {
                         case counter < (maxMsgLines + 1):
-                            msgLines = append(msgLines, line)
+                            msgLines = append(msgLines, fmt.Sprintf("%v: %v", clines, line))
                         case counter == (maxMsgLines + 1):
                             msgLines = append(msgLines, "...")
                     }
@@ -238,6 +269,10 @@ func (f *File) Check(group *sync.WaitGroup, logger *LogChecker) error {
                 }
             }
         }
+    }
+    err = scanner.Err()
+    if err != nil {
+        return err
     }
     curPeriod, sent := f.Duration(), false
     if curPeriod != f.Granularity {
@@ -258,7 +293,7 @@ func (f *File) Check(group *sync.WaitGroup, logger *LogChecker) error {
         } else {
             notifier = logger
         }
-        message := fmt.Sprintf("%v\n%v\n\n--\nBR, LogChecker", emailMsg, strings.Join(msgLines, "\n"))
+        message := fmt.Sprintf("%v\n\nReport for \"%v\" service (%v new items): %v\n%v\n\n--\nBR, LogChecker", emailMsg, f.service, f.Found, f.Log, strings.Join(msgLines, "\n"))
         go notifier.Notify(message, f.Emails)
         f.Counter++
         sent = true
@@ -407,7 +442,7 @@ func (logger *LogChecker) Validate() error {
 // Notify sends a prepared email message.
 func (logger *LogChecker) Notify(msg string, to []string) {
     const mime string = "MIME-version: 1.0;\nContent-Type: text/plain; charset=\"UTF-8\";\n\n";
-    content := []byte("Subject: LogChecker notification\n" + mime + msg)
+    content := []byte("From: LogChecker\nSubject: LogChecker notification\n" + mime + msg)
     auth := smtp.PlainAuth(
         "",
         logger.Cfg.Sender["user"],
@@ -436,13 +471,14 @@ func (logger *LogChecker) Start(group *sync.WaitGroup) (chan bool, error) {
     logger.Running = time.Now()
     defer LoggerInfo.Printf("%v is started.\n", logger)
 
-    for _, serv := range logger.Cfg.Observed {
+    for i, serv := range logger.Cfg.Observed {
         info := make([]string, len(serv.Files))
         for j := range serv.Files {
             if err := serv.Files[j].Validate(); err != nil {
                 LoggerError.Printf("incorrect file was skipped [%v / %v]\n", serv.Name, serv.Files[j].Base())
                 info[j] = fmt.Sprintf("FAILED: %s", serv.Files[j].String())
             } else {
+                serv.Files[j].service = &logger.Cfg.Observed[i]
                 serv.Files[j].LogStart = time.Now()
                 serv.Files[j].ExtBoundary = serv.Files[j].Boundary
                 go serv.Files[j].Watch(group, finish, logger)

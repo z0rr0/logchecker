@@ -75,6 +75,26 @@ func prepareConfig(from, to string, replace map[string]string) error {
     return ioutil.WriteFile(to, []byte(strinfo), os.FileMode(0666))
 }
 
+func checkEmailSimulator(emailSimulator string, start int) (int, error) {
+    file, err := os.Open(emailSimulator)
+    if err != nil {
+        return 0, err
+    }
+    defer file.Close()
+
+    counter, scanner := 0, bufio.NewScanner(file)
+    for scanner.Scan() {
+        if line := scanner.Text(); len(line) > 0 {
+            counter++
+        }
+    }
+    err = scanner.Err()
+    if err != nil {
+        return 0, err
+    }
+    return counter - start, nil
+}
+
 // Tests
 
 func TestDebugMode(t *testing.T) {
@@ -330,6 +350,7 @@ func TestStart(t *testing.T) {
     var (
         group sync.WaitGroup
         Period time.Duration = 30 * time.Second
+        err error
     )
     rm := func(name string) {
         if err := os.Remove(name); err != nil {
@@ -349,20 +370,42 @@ func TestStart(t *testing.T) {
         t.Errorf("can't prepare test config file [%v]", err)
     }
     defer rm(example)
-    for _, v := range newvalues {
+
+    for k, v := range newvalues {
+        // skip a file to check error handling
         if err := createFile(v, 0666); err != nil {
             t.Errorf("test file preparation error [%v]: %v", v, err)
+        } else {
+            if k != "/var/log/nginx/access.log" {
+                defer rm(v)
+            }
         }
-        defer rm(v)
     }
+    testFile := newvalues["/var/log/nginx/error.log"]
+
+    // create EmailSimulator
+    EmailSimulator = filepath.Join(testdir, "EmailSimulator")
+    os.Remove(EmailSimulator) // try to delete test file
+    if err := createFile(EmailSimulator, 0660); err != nil {
+        t.Errorf("EmailSimulator error [%v]: %v", EmailSimulator, err)
+    }
+    defer rm(EmailSimulator)
 
     logger := New()
     if err := InitConfig(logger, example); err != nil {
         t.Error(err)
     }
     logger.Name = "Test-LogChecker"
+
+    // incorrect stop without start
+    finish := make(chan bool)
+    if err = logger.Stop(finish, &group); err == nil {
+        t.Error(err)
+    }
+    // delete a file
+    rm(newvalues["/var/log/nginx/access.log"])
     // process start
-    finish, err := logger.Start(&group)
+    finish, err = logger.Start(&group)
     if err != nil {
         t.Error(err)
     }
@@ -379,43 +422,88 @@ func TestStart(t *testing.T) {
     sigchan := make(chan os.Signal, 2)
     signal.Notify(sigchan, os.Interrupt, syscall.SIGTERM)
 
-    // notificationCounter := 2
-
-    for {
-        select {
-            case <-sigchan:
-                t.Log("process will be stopped")
-                close(finish)
-                group.Wait()
-                return
-            case event := <-watcher.Event:
-                t.Log("process will be resarted due to reconfiguration")
-                if (event.Mask & inotify.IN_DELETE_SELF) != 0 {
-                    watcher, err = IsMoved(logger.Cfg.Path, watcher)
-                    if err != nil {
-                        t.Errorf("re-creation watcher error: %v\n", err)
-                    }
-                }
-                if err = logger.Stop(finish, &group); err != nil {
-                    t.Error(err)
-                }
-                err = InitConfig(logger, logger.Cfg.Path)
-                if err != nil {
-                    t.Error(err)
-                }
-                finish, err = logger.Start(&group)
-                if err != nil {
-                    t.Errorf("can't start the process: %v\n", err)
-                    t.Error(err)
-                }
-            case werr := <-watcher.Error:
-                t.Errorf("config watcher error: %v\n", werr)
-                if err = logger.Stop(finish, &group); err != nil {
-                    t.Error(err)
-                }
-                t.Error(werr)
-            case <- timestat:
-                t.Log("statictics: %v", logger)
-        }
+    delay := func() {
+        time.Sleep(100 * time.Millisecond)
     }
+
+    stopMonitor := make(chan bool)
+    // run monitoring
+    delay()
+    go func() {
+        for {
+            select {
+                case <-stopMonitor:
+                    t.Log("stop monitoring")
+                    if err = logger.Stop(finish, &group); err != nil {
+                        t.Error(err)
+                    }
+                    return
+                case <-sigchan:
+                    t.Log("process will be stopped")
+                    if err = logger.Stop(finish, &group); err != nil {
+                        t.Error(err)
+                    }
+                    return
+                case event := <-watcher.Event:
+                    t.Log("process will be restarted due to reconfiguration")
+                    if (event.Mask & inotify.IN_DELETE_SELF) != 0 {
+                        watcher, err = IsMoved(logger.Cfg.Path, watcher)
+                        if err != nil {
+                            t.Errorf("re-creation watcher error: %v\n", err)
+                        }
+                    }
+                    if err = logger.Stop(finish, &group); err != nil {
+                        t.Error(err)
+                    }
+                    err = InitConfig(logger, logger.Cfg.Path)
+                    if err != nil {
+                        t.Error(err)
+                    }
+                    finish, err = logger.Start(&group)
+                    if err != nil {
+                        t.Errorf("can't start the process: %v\n", err)
+                        t.Error(err)
+                    }
+                case werr := <-watcher.Error:
+                    t.Errorf("config watcher error: %v\n", werr)
+                    if err = logger.Stop(finish, &group); err != nil {
+                        t.Error(err)
+                    }
+                    t.Error(werr)
+                    return
+                case <- timestat:
+                    t.Log("statictics: %v", logger)
+            }
+        }
+    }()
+
+    currentPos := 0
+    // 1st update - valid
+    if err := updateFile(testFile, "ERROR"); err != nil {
+        t.Error(err)
+    }
+    delay()
+    emailsCounter, err := checkEmailSimulator(EmailSimulator, currentPos)
+    if err != nil {
+        t.Error(err)
+    }
+    if emailsCounter != 1 {
+        t.Errorf("incorect emailsCounter: %v", emailsCounter)
+    }
+
+    // 2nd update - invalid
+    currentPos = emailsCounter
+    if err := updateFile(testFile, "invalid"); err != nil {
+        t.Error(err)
+    }
+    delay()
+    emailsCounter, err = checkEmailSimulator(EmailSimulator, currentPos)
+    if err != nil {
+        t.Error(err)
+    }
+    if emailsCounter > 0 {
+        t.Errorf("incorect emailsCounter: %v", emailsCounter)
+    }
+
+    close(stopMonitor)
 }

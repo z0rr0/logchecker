@@ -17,7 +17,7 @@
           "emails": ["user_1@host.com", "user_2@host.com"],
           "boundary": 1,
           "period": 3600,
-          "limit": 3
+          "limit": 1
         },
         {
           "file": "/var/log/nginx/access.log",

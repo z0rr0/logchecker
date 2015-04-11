@@ -11,4 +11,4 @@ install:
     - go get golang.org/x/exp/inotify
 
 script:
-    - go test -v ./...
+    - bash test.sh

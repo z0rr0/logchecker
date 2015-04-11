@@ -1,18 +1,16 @@
 # LogChecker
 
+[![GoDoc](https://godoc.org/github.com/z0rr0/logchecker/logchecker?status.svg)](https://godoc.org/github.com/z0rr0/logchecker/logchecker) [![Build Status](https://travis-ci.org/z0rr0/logchecker.svg?branch=master)](https://travis-ci.org/z0rr0/logchecker)
+
 It is a simple library to check a list of logs files and send notification about their abnormal activities.
 
 **IMPORTANT:** _**It is in development now.**_
-
-[![GoDoc](https://godoc.org/github.com/z0rr0/logchecker?status.svg)](https://godoc.org/github.com/z0rr0/logchecker)
-
-[![Build Status](https://travis-ci.org/z0rr0/logchecker.svg?branch=master)](https://travis-ci.org/z0rr0/logchecker)
 
 ### Usage
 
 Only Linux is supported now.
 
-API descriptions can be found on [godoc.org](http://godoc.org/github.com/z0rr0/logchecker).
+API descriptions can be found on [godoc.org](http://godoc.org/github.com/z0rr0/logchecker/logchecker).
 
 ```go
 import "logchecker"

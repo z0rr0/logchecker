@@ -81,11 +81,12 @@ func main() {
         select {
             case <-sigchan:
                 logchecker.LoggerInfo.Println("process will be stopped")
-                close(finish)
-                group.Wait()
+                if err = logger.Stop(finish, &group); err != nil {
+                    logchecker.LoggerError.Panicln(err)
+                }
                 os.Exit(0)
             case event := <-watcher.Event:
-                logchecker.LoggerInfo.Println("process will be resarted due to reconfiguration")
+                logchecker.LoggerInfo.Println("process will be restarted due to reconfiguration")
                 if (event.Mask & inotify.IN_DELETE_SELF) != 0 {
                     watcher, err = logchecker.IsMoved(logger.Cfg.Path, watcher)
                     if err != nil {
