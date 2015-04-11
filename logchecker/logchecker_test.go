@@ -349,7 +349,7 @@ func TestIsMoved(t *testing.T) {
 func TestStart(t *testing.T) {
     var (
         group sync.WaitGroup
-        Period time.Duration = 30 * time.Second
+        Period = 30 * time.Second
         err error
     )
     rm := func(name string) {

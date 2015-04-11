@@ -19,13 +19,15 @@ import (
 )
 
 const (
+    // Config is a configuration file name.
     Config string = "config.json"
     // Period time.Duration = 60 * time.Minute
     Period time.Duration = 30 * time.Second
 )
 
 var (
-    Version string = "uknown"
+    // Version is program version, it is set during a build.
+    Version = "uknown"
 )
 
 func main() {
