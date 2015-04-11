@@ -37,7 +37,7 @@ import (
 )
 
 const (
-    watcherMask uint32 = inotify.IN_CLOSE_WRITE | inotify.IN_ATTRIB
+    watcherMask uint32 = inotify.IN_MODIFY | inotify.IN_ATTRIB
     maxMsgLines uint64 = 10
     emailMsg string = "LogChecker notification.\n"
 )
