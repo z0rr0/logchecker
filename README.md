@@ -12,22 +12,29 @@ Only Linux is supported now.
 
 API descriptions can be found on [godoc.org](http://godoc.org/github.com/z0rr0/logchecker/logchecker).
 
-```go
-import "logchecker"
-import "log"
-// ...
-
-logger := logchecker.New()
-if err := logchecker.InitConfig(logger, "config.json"); err != nil {
-    log.Panicf("logchecker error: %v\n", err)
-}
-```
-
 
 ### Configuration
 
 Files for observation can be added using a configuration file, see examples in [config.example.json](https://github.com/z0rr0/logchecker/blob/master/config.example.json).
 
+
+Description of "observed" array element:
+
+```json
+{
+  "name": "My service #2",           // Service name
+  "files": [                         // watched files
+    {
+      "file": "/var/log/syslog",     // absolute file path
+      "pattern": "My service error", // regexp pattern for monitoring
+      "increase": false,             // increase "boundary" value during a time period
+      "emails": ["user_1@host.com"], // email addresses for notifications
+      "boundary": 1,                 // boundary value for notifications
+      "period": 3600,                // a time period
+      "limit": 6                     // maximum emails during time period
+    }
+  ]
+}
 ```
 
 ### Testing
@@ -35,7 +42,7 @@ Files for observation can be added using a configuration file, see examples in [
 Use standard Go testing mechanism:
 
 ```shell
-cd $GOPATH/src/github.com/z0rr0/logchecker
+cd $GOPATH/src/github.com/z0rr0/logchecker/logchecker
 go test
 ```
 
@@ -53,7 +60,7 @@ There are recommended style guides:
 * [The Go Programming Language Specification](https://golang.org/ref/spec)
 * [Go Code Review Comments](https://github.com/golang/go/wiki/CodeReviewComments).
 
-A compliance with the second style guide can be checked using [go-lint](http://go-lint.appspot.com/github.com/z0rr0/logchecker) tool.
+A compliance with the second style guide can be checked using [go-lint](http://go-lint.appspot.com/github.com/z0rr0/logchecker/logchecker) tool.
 
 ### License
 

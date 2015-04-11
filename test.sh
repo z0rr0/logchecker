@@ -8,6 +8,7 @@
 program="logchecker"
 gobin="`which go`"
 repo="github.com/z0rr0/logchecker"
+buildDir=""
 
 if [ -z "$GOPATH" ]; then
     echo "ERROR: set GOPATH env"
@@ -18,7 +19,13 @@ if [ ! -x "$gobin" ]; then
     exit 2
 fi
 
-cd ${GOPATH}/src/${repo}/logchecker
+if [ -n "$TRAVIS_BUILD_DIR" ]; then
+	buildDir="$TRAVIS_BUILD_DIR"
+else
+	buildDir="${GOPATH}/src/${repo}"
+fi
+
+cd ${buildDir}/logchecker
 go test -v -cover -coverprofile=coverage.out || exit 1
 
 echo "all tests done"
