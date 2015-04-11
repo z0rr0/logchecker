@@ -30,8 +30,8 @@ Description of "observed" array element:
       "increase": false,             // increase "boundary" value during a time period
       "emails": ["user_1@host.com"], // email addresses for notifications
       "boundary": 1,                 // boundary value for notifications
-      "period": 3600,                // a time period
-      "limit": 6                     // maximum emails during time period
+      "period": 3600,                // time period
+      "limit": 6                     // maximum emails during a time period
     }
   ]
 }
