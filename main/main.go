@@ -21,8 +21,8 @@ import (
 const (
     // Config is a configuration file name.
     Config string = "config.json"
-    // Period time.Duration = 60 * time.Minute
-    Period time.Duration = 30 * time.Second
+    // Period is time between statistics print
+    Period time.Duration = 60 * time.Minute
 )
 
 var (
