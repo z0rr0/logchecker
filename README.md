@@ -20,7 +20,7 @@ Files for observation can be added using a configuration file, see examples in [
 
 Description of "observed" array element:
 
-```json
+```javascript
 {
   "name": "My service #2",           // Service name
   "files": [                         // watched files
